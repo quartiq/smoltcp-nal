@@ -1,0 +1,13 @@
+[package]
+name = "smoltcp-nal"
+version = "0.1.0"
+authors = ["Ryan Summers <ryan.summers@vertigo-designs.com>"]
+edition = "2018"
+
+[dependencies]
+heapless = "0.5"
+embedded-nal = "0.1"
+
+[dependencies.smoltcp]
+version = "0.7"
+features = ["ethernet", "proto-ipv4", "proto-ipv6", "socket-tcp"]

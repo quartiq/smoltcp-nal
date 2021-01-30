@@ -1,5 +1,8 @@
 #![no_std]
 
+pub use embedded_nal;
+pub use smoltcp;
+
 use core::cell::RefCell;
 use heapless::{consts, Vec};
 

@@ -3,6 +3,11 @@ name = "smoltcp-nal"
 version = "0.1.0"
 authors = ["Ryan Summers <ryan.summers@vertigo-designs.com>"]
 edition = "2018"
+license = "MIT"
+description = "embedded-nal implementation for smoltcp"
+keywords = ["smoltcp", "embedded-nal", "tcp"]
+categories = ["network-programming", "no-std"]
+repository = "https://github.com/quartiq/smoltcp-nal.git"
 
 [dependencies]
 heapless = "0.5"

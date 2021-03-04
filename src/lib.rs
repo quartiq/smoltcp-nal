@@ -105,9 +105,7 @@ where
 
                     if let Some(route) = config.router {
                         // TODO: Determine if this unwrap is safe?
-                        self.network_interface
-                            .borrow_mut()
-                            .routes_mut()
+                        interface.routes_mut()
                             .add_default_ipv4_route(route)
                             .unwrap();
                     }

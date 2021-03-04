@@ -3,6 +3,9 @@
 pub use embedded_nal;
 pub use smoltcp;
 
+use smoltcp::dhcp::Dhcpv4Client;
+use smoltcp::wire::IpCidr::Ipv4;
+
 use core::cell::RefCell;
 use heapless::{consts, Vec};
 
@@ -13,6 +16,7 @@ pub enum NetworkError {
     ReadFailure,
     WriteFailure,
     Unsupported,
+    NoIpAddress,
 }
 
 ///! Network abstraction layer for smoltcp.
@@ -21,6 +25,7 @@ where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
 {
     network_interface: RefCell<smoltcp::iface::EthernetInterface<'b, DeviceT>>,
+    dhcp_client: RefCell<Option<Dhcpv4Client>>,
     sockets: RefCell<smoltcp::socket::SocketSet<'a>>,
     next_port: RefCell<u16>,
     unused_handles: RefCell<Vec<smoltcp::socket::SocketHandle, consts::U16>>,
@@ -32,24 +37,33 @@ where
 {
     /// Construct a new network stack.
     ///
+    /// # Note
+    /// This implementation only supports up to 16 usable sockets.
+    ///
     /// # Args
     /// * `stack` - The ethernet interface to construct the network stack from.
     /// * `sockets` - The socket set to contain any socket state for the stack.
+    /// * `handles` - A list of socket handles that can be used.
+    /// * `dhcp` - An optional DHCP client if DHCP usage is desired. If None, DHCP will not be used.
     ///
     /// # Returns
     /// A embedded-nal-compatible network stack.
     pub fn new(
         stack: smoltcp::iface::EthernetInterface<'b, DeviceT>,
         sockets: smoltcp::socket::SocketSet<'a>,
+        handles: &[smoltcp::socket::SocketHandle],
+        dhcp: Option<Dhcpv4Client>,
     ) -> Self {
         let mut unused_handles: Vec<smoltcp::socket::SocketHandle, consts::U16> = Vec::new();
-        for socket in sockets.iter() {
-            unused_handles.push(socket.handle()).unwrap();
+        for handle in handles.iter() {
+            // Note: If the user supplies too many handles, we choose to silently drop them.
+            unused_handles.push(*handle).ok();
         }
 
         NetworkStack {
             network_interface: RefCell::new(stack),
             sockets: RefCell::new(sockets),
+            dhcp_client: RefCell::new(dhcp),
             next_port: RefCell::new(49152),
             unused_handles: RefCell::new(unused_handles),
         }
@@ -60,17 +74,54 @@ where
     /// # Returns
     /// A boolean indicating if the network stack updated in any way.
     pub fn poll(&self, time: u32) -> bool {
-        match self.network_interface.borrow_mut().poll(
-            &mut self.sockets.borrow_mut(),
-            smoltcp::time::Instant::from_millis(time as i64),
-        ) {
+        let now = smoltcp::time::Instant::from_millis(time as i64);
+        let updated = match self
+            .network_interface
+            .borrow_mut()
+            .poll(&mut self.sockets.borrow_mut(), now)
+        {
             Ok(updated) => updated,
 
             // Ignore any errors - they indicate failures with external reception as opposed to
             // internal state management.
             // TODO: Should we ignore `Exhausted`, `Illegal`, `Unaddressable`?
             Err(_) => true,
+        };
+
+        // Service the DHCP client.
+        if let Some(dhcp_client) = &mut *self.dhcp_client.borrow_mut() {
+            let mut interface = self.network_interface.borrow_mut();
+            match dhcp_client.poll(&mut interface, &mut self.sockets.borrow_mut(), now) {
+                Ok(Some(config)) => {
+                    if let Some(cidr) = config.address {
+                        if cidr.address().is_unicast() {
+                            interface.update_ip_addrs(|addrs| {
+                                addrs.iter_mut().next().map(|addr| {
+                                    *addr = Ipv4(cidr);
+                                });
+                            });
+                        }
+                    }
+
+                    if let Some(route) = config.router {
+                        // TODO: Determine if this unwrap is safe?
+                        self.network_interface
+                            .borrow_mut()
+                            .routes_mut()
+                            .add_default_ipv4_route(route)
+                            .unwrap();
+                    }
+
+                    // TODO: Store DNS server addresses for later read-back
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    // TODO: Handle this error somehow?
+                }
+            }
         }
+
+        updated
     }
 
     // Get an ephemeral TCP port number.
@@ -96,6 +147,18 @@ where
         &self,
         _mode: embedded_nal::Mode,
     ) -> Result<smoltcp::socket::SocketHandle, NetworkError> {
+        // If we do not have a valid IP address yet, do not open the socket.
+        // Note(unwrap): This stack only supports Ipv4.
+        if self
+            .network_interface
+            .borrow_mut()
+            .ipv4_addr()
+            .unwrap()
+            .is_unspecified()
+        {
+            return Err(NetworkError::NoIpAddress);
+        }
+
         match self.unused_handles.borrow_mut().pop() {
             Some(handle) => {
                 // Abort any active connections on the handle.

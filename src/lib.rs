@@ -4,7 +4,7 @@ pub use embedded_nal;
 pub use smoltcp;
 
 use smoltcp::dhcp::Dhcpv4Client;
-use smoltcp::wire::{IpAddress, Ipv4Address, IpCidr};
+use smoltcp::wire::IpCidr;
 
 use core::cell::RefCell;
 use heapless::{consts, Vec};
@@ -116,19 +116,6 @@ where
                 Err(_) => {
                     // TODO: Handle this error somehow?
                 }
-            }
-
-            // Check if the DHCP lease has expired and remove configured values if it has.
-            if dhcp_client.lease_expired(now) {
-                interface.update_ip_addrs(|addrs| {
-                    addrs.iter_mut().next().map(|addr| {
-                        *addr = IpCidr::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0);
-                    });
-                });
-
-                interface.routes_mut()
-                    .add_default_ipv4_route(Ipv4Address::UNSPECIFIED)
-                    .unwrap();
             }
         }
 

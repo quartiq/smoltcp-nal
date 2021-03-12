@@ -29,6 +29,7 @@ where
     sockets: RefCell<smoltcp::socket::SocketSet<'a>>,
     next_port: RefCell<u16>,
     unused_handles: RefCell<Vec<smoltcp::socket::SocketHandle, consts::U16>>,
+    name_servers: RefCell<[Option<smoltcp::wire::Ipv4Address>; 3]>,
 }
 
 impl<'a, 'b, DeviceT> NetworkStack<'a, 'b, DeviceT>
@@ -66,6 +67,7 @@ where
             dhcp_client: RefCell::new(dhcp),
             next_port: RefCell::new(49152),
             unused_handles: RefCell::new(unused_handles),
+            name_servers: RefCell::new([None, None, None]),
         }
     }
 
@@ -73,7 +75,7 @@ where
     ///
     /// # Returns
     /// A boolean indicating if the network stack updated in any way.
-    pub fn poll(&self, time: u32) -> bool {
+    pub fn poll(&self, time: u32) -> Result<bool, smoltcp::Error> {
         let now = smoltcp::time::Instant::from_millis(time as i64);
         let updated = match self
             .network_interface
@@ -81,11 +83,7 @@ where
             .poll(&mut self.sockets.borrow_mut(), now)
         {
             Ok(updated) => updated,
-
-            // Ignore any errors - they indicate failures with external reception as opposed to
-            // internal state management.
-            // TODO: Should we ignore `Exhausted`, `Illegal`, `Unaddressable`?
-            Err(_) => true,
+            err => return err,
         };
 
         // Service the DHCP client.
@@ -111,16 +109,15 @@ where
                             .unwrap();
                     }
 
-                    // TODO: Store DNS server addresses for later read-back
+                    // Store DNS server addresses for later read-back
+                    *self.name_servers.borrow_mut() = config.dns_servers;
                 }
                 Ok(None) => {}
-                Err(_) => {
-                    // TODO: Handle this error somehow?
-                }
+                Err(err) => return Err(err),
             }
         }
 
-        updated
+        Ok(updated)
     }
 
     // Get an ephemeral TCP port number.

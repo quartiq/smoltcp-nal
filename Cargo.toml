@@ -14,7 +14,6 @@ heapless = ">=0.6.1"
 embedded-nal = "0.1"
 
 [dependencies.smoltcp]
-git = "https://github.com/ryan-summers/smoltcp"
-branch = "feature/dhcp-lease-updates"
+version = "0.7"
 features = ["ethernet", "proto-ipv4", "proto-ipv6", "socket-tcp", "proto-dhcpv4"]
 default-features = false

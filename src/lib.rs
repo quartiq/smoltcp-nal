@@ -4,7 +4,7 @@ pub use embedded_nal;
 pub use smoltcp;
 
 use smoltcp::dhcp::Dhcpv4Client;
-use smoltcp::wire::IpCidr::Ipv4;
+use smoltcp::wire::{IpAddress, Ipv4Address, IpCidr};
 
 use core::cell::RefCell;
 use heapless::{consts, Vec};
@@ -97,7 +97,7 @@ where
                         if cidr.address().is_unicast() {
                             interface.update_ip_addrs(|addrs| {
                                 addrs.iter_mut().next().map(|addr| {
-                                    *addr = Ipv4(cidr);
+                                    *addr = IpCidr::Ipv4(cidr);
                                 });
                             });
                         }
@@ -116,6 +116,19 @@ where
                 Err(_) => {
                     // TODO: Handle this error somehow?
                 }
+            }
+
+            // Check if the DHCP lease has expired and remove configured values if it has.
+            if dhcp_client.lease_expired(now) {
+                interface.update_ip_addrs(|addrs| {
+                    addrs.iter_mut().next().map(|addr| {
+                        *addr = IpCidr::new(IpAddress::Ipv4(Ipv4Address::UNSPECIFIED), 0);
+                    });
+                });
+
+                interface.routes_mut()
+                    .add_default_ipv4_route(Ipv4Address::UNSPECIFIED)
+                    .unwrap();
             }
         }
 
@@ -175,6 +188,19 @@ where
         socket: smoltcp::socket::SocketHandle,
         remote: embedded_nal::SocketAddr,
     ) -> Result<smoltcp::socket::SocketHandle, NetworkError> {
+        // If there is no longer an IP address assigned to the interface, do not allow usage of the
+        // socket.
+        if self
+            .network_interface
+            .borrow_mut()
+            .ipv4_addr()
+            .unwrap()
+            .is_unspecified()
+        {
+            self.close(socket)?;
+            return Err(NetworkError::NoIpAddress);
+        }
+
         let mut sockets = self.sockets.borrow_mut();
         let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *sockets.get(socket);
 
@@ -200,6 +226,18 @@ where
     }
 
     fn is_connected(&self, socket: &smoltcp::socket::SocketHandle) -> Result<bool, NetworkError> {
+        // If there is no longer an IP address assigned to the interface, do not allow usage of the
+        // socket.
+        if self
+            .network_interface
+            .borrow_mut()
+            .ipv4_addr()
+            .unwrap()
+            .is_unspecified()
+        {
+            return Err(NetworkError::NoIpAddress);
+        }
+
         let mut sockets = self.sockets.borrow_mut();
         let socket: &mut smoltcp::socket::TcpSocket = &mut *sockets.get(*socket);
         Ok(socket.may_send() && socket.may_recv())
@@ -210,6 +248,18 @@ where
         socket: &mut smoltcp::socket::SocketHandle,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
+        // If there is no longer an IP address assigned to the interface, do not allow usage of the
+        // socket.
+        if self
+            .network_interface
+            .borrow_mut()
+            .ipv4_addr()
+            .unwrap()
+            .is_unspecified()
+        {
+            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
+        }
+
         let mut sockets = self.sockets.borrow_mut();
         let socket: &mut smoltcp::socket::TcpSocket = &mut *sockets.get(*socket);
         socket
@@ -222,6 +272,18 @@ where
         socket: &mut smoltcp::socket::SocketHandle,
         buffer: &mut [u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
+        // If there is no longer an IP address assigned to the interface, do not allow usage of the
+        // socket.
+        if self
+            .network_interface
+            .borrow_mut()
+            .ipv4_addr()
+            .unwrap()
+            .is_unspecified()
+        {
+            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
+        }
+
         let mut sockets = self.sockets.borrow_mut();
         let socket: &mut smoltcp::socket::TcpSocket = &mut *sockets.get(*socket);
         socket

@@ -4,6 +4,7 @@ This document describes the changes to smoltcp-nal between releases.
 
 # Unreleased
 * Upgraded to 0.6.1 of heapless to address security vulnerability
+* Adding support for DHCP IP assignment and management.
 
 ## Version 0.1.0
 Version 0.1.0 was published on 2021-02-17

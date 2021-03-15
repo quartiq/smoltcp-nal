@@ -41,6 +41,9 @@ where
     /// # Note
     /// This implementation only supports up to 16 usable sockets.
     ///
+    /// Any handles provided to this function must not be used after constructing the network
+    /// stack.
+    ///
     /// # Args
     /// * `stack` - The ethernet interface to construct the network stack from.
     /// * `sockets` - The socket set to contain any socket state for the stack.
@@ -130,6 +133,15 @@ where
 
         return current_port;
     }
+
+    fn is_ip_unspecified(&self) -> bool {
+        // Note(unwrap): This stack only supports Ipv4.
+        self.network_interface
+            .borrow_mut()
+            .ipv4_addr()
+            .unwrap()
+            .is_unspecified()
+    }
 }
 
 impl<'a, 'b, DeviceT> embedded_nal::TcpStack for NetworkStack<'a, 'b, DeviceT>
@@ -144,14 +156,7 @@ where
         _mode: embedded_nal::Mode,
     ) -> Result<smoltcp::socket::SocketHandle, NetworkError> {
         // If we do not have a valid IP address yet, do not open the socket.
-        // Note(unwrap): This stack only supports Ipv4.
-        if self
-            .network_interface
-            .borrow_mut()
-            .ipv4_addr()
-            .unwrap()
-            .is_unspecified()
-        {
+        if self.is_ip_unspecified() {
             return Err(NetworkError::NoIpAddress);
         }
 
@@ -175,13 +180,7 @@ where
     ) -> Result<smoltcp::socket::SocketHandle, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
         // socket.
-        if self
-            .network_interface
-            .borrow_mut()
-            .ipv4_addr()
-            .unwrap()
-            .is_unspecified()
-        {
+        if self.is_ip_unspecified() {
             self.close(socket)?;
             return Err(NetworkError::NoIpAddress);
         }
@@ -213,13 +212,7 @@ where
     fn is_connected(&self, socket: &smoltcp::socket::SocketHandle) -> Result<bool, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
         // socket.
-        if self
-            .network_interface
-            .borrow_mut()
-            .ipv4_addr()
-            .unwrap()
-            .is_unspecified()
-        {
+        if self.is_ip_unspecified() {
             return Err(NetworkError::NoIpAddress);
         }
 
@@ -235,13 +228,7 @@ where
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
         // socket.
-        if self
-            .network_interface
-            .borrow_mut()
-            .ipv4_addr()
-            .unwrap()
-            .is_unspecified()
-        {
+        if self.is_ip_unspecified() {
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
@@ -259,13 +246,7 @@ where
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
         // socket.
-        if self
-            .network_interface
-            .borrow_mut()
-            .ipv4_addr()
-            .unwrap()
-            .is_unspecified()
-        {
+        if self.is_ip_unspecified() {
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 

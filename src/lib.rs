@@ -137,7 +137,7 @@ where
             if let Some(ref mut socket) =
                 smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
             {
-                socket.close();
+                socket.abort();
             }
         }
     }

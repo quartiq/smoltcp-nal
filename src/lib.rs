@@ -229,7 +229,10 @@ where
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
                 internal_socket
                     .connect((address, remote.port()), self.get_ephemeral_port())
-                    .map_err(|_| NetworkError::ConnectionFailure)?;
+                    .or_else(|_| {
+                        self.close(socket)?;
+                        Err(NetworkError::ConnectionFailure)
+                    })?;
                 Ok(socket)
             }
 

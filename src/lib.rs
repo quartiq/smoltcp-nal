@@ -4,6 +4,7 @@ pub use embedded_nal;
 pub use smoltcp;
 
 use smoltcp::dhcp::Dhcpv4Client;
+use smoltcp::socket::AnySocket;
 use smoltcp::wire::IpCidr;
 
 use core::cell::RefCell;
@@ -97,6 +98,11 @@ where
                     if let Some(cidr) = config.address {
                         if cidr.address().is_unicast() {
                             interface.update_ip_addrs(|addrs| {
+                                // If our address has updated, close all sockets.
+                                if addrs[0] == IpCidr::Ipv4(cidr) {
+                                    self.close_sockets();
+                                }
+
                                 addrs.iter_mut().next().map(|addr| {
                                     *addr = IpCidr::Ipv4(cidr);
                                 });
@@ -121,6 +127,29 @@ where
         }
 
         Ok(updated)
+    }
+
+    // Force-close all sockets.
+    fn close_sockets(&self) {
+        // Close all sockets.
+        for mut socket in self.sockets.borrow_mut().iter_mut() {
+            // We only explicitly can close TCP sockets because we cannot access other socket types.
+            if let Some(ref mut socket) =
+                smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
+            {
+                socket.close();
+            }
+        }
+    }
+
+    /// Reset the network stack and close all opened sockets.
+    pub fn reset(&mut self) {
+        // Reset the DHCP client. We will forget any previous lease that we had.
+        if let Some(ref mut client) = *self.dhcp_client.borrow_mut() {
+            client.reset(smoltcp::time::Instant::from_millis(-1));
+        }
+
+        self.close_sockets();
     }
 
     // Get an ephemeral TCP port number.

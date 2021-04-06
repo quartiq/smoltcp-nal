@@ -5,7 +5,7 @@ pub use smoltcp;
 
 use smoltcp::dhcp::Dhcpv4Client;
 use smoltcp::socket::AnySocket;
-use smoltcp::wire::IpCidr;
+use smoltcp::wire::{IpCidr, Ipv4Address, Ipv4Cidr};
 
 use core::cell::RefCell;
 use heapless::{consts, Vec};
@@ -100,7 +100,7 @@ where
                             interface.update_ip_addrs(|addrs| {
                                 // If our address has updated or is not specified, close all
                                 // sockets.
-                                if cidr.address().is_unspecified() || addrs[0] == IpCidr::Ipv4(cidr)
+                                if cidr.address().is_unspecified() || addrs[0] != IpCidr::Ipv4(cidr)
                                 {
                                     self.close_sockets();
                                 }
@@ -112,16 +112,14 @@ where
                         }
                     }
 
-                    if let Some(route) = config.router {
-                        // TODO: Determine if this unwrap is safe?
-                        interface
-                            .routes_mut()
-                            .add_default_ipv4_route(route)
-                            .unwrap();
-                    }
-
                     // Store DNS server addresses for later read-back
                     *self.name_servers.borrow_mut() = config.dns_servers;
+
+                    if let Some(route) = config.router {
+                        // Note: If the user did not provide enough route storage, we may not be
+                        // able to store the gateway.
+                        interface.routes_mut().add_default_ipv4_route(route)?;
+                    }
                 }
                 Ok(None) => {}
                 Err(err) => return Err(err),
@@ -150,6 +148,16 @@ where
         if let Some(ref mut client) = *self.dhcp_client.borrow_mut() {
             client.reset(smoltcp::time::Instant::from_millis(-1));
         }
+
+        // Close all of the sockets and de-configure the interface.
+        self.close_sockets();
+
+        let mut interface = self.network_interface.borrow_mut();
+        interface.update_ip_addrs(|addrs| {
+            addrs.iter_mut().next().map(|addr| {
+                *addr = IpCidr::Ipv4(Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0));
+            });
+        });
     }
 
     // Get an ephemeral TCP port number.

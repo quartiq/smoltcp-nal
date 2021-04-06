@@ -45,6 +45,8 @@ where
     /// Any handles provided to this function must not be used after constructing the network
     /// stack.
     ///
+    /// This implementation currently only supports IPv4.
+    ///
     /// # Args
     /// * `stack` - The ethernet interface to construct the network stack from.
     /// * `sockets` - The socket set to contain any socket state for the stack.

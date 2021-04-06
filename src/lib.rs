@@ -5,7 +5,7 @@ pub use smoltcp;
 
 use smoltcp::dhcp::Dhcpv4Client;
 use smoltcp::socket::AnySocket;
-use smoltcp::wire::{IpCidr, Ipv4Address, Ipv4Cidr};
+use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
 
 use core::cell::RefCell;
 use heapless::{consts, Vec};
@@ -97,18 +97,29 @@ where
                 Ok(Some(config)) => {
                     if let Some(cidr) = config.address {
                         if cidr.address().is_unicast() {
-                            interface.update_ip_addrs(|addrs| {
+                            // Note(unwrap): This stack only supports IPv4 and the client must have
+                            // provided an address.
+                            if cidr.address().is_unspecified()
+                                || interface.ipv4_address().unwrap() != cidr.address()
+                            {
                                 // If our address has updated or is not specified, close all
                                 // sockets.
-                                if cidr.address().is_unspecified() || addrs[0] != IpCidr::Ipv4(cidr)
-                                {
-                                    self.close_sockets();
-                                }
+                                self.close_sockets();
 
-                                addrs.iter_mut().next().map(|addr| {
+                                interface.update_ip_addrs(|addrs| {
+                                    // Note(unwrap): This stack requires at least 1 Ipv4 Address.
+                                    let addr = addrs
+                                        .iter_mut()
+                                        .filter(|cidr| match cidr.address() {
+                                            IpAddress::Ipv4(_) => true,
+                                            _ => false,
+                                        })
+                                        .next()
+                                        .unwrap();
+
                                     *addr = IpCidr::Ipv4(cidr);
                                 });
-                            });
+                            }
                         }
                     }
 

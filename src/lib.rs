@@ -4,7 +4,8 @@ pub use embedded_nal;
 pub use smoltcp;
 
 use smoltcp::dhcp::Dhcpv4Client;
-use smoltcp::wire::IpCidr;
+use smoltcp::socket::AnySocket;
+use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
 
 use core::cell::RefCell;
 use heapless::{consts, Vec};
@@ -43,6 +44,8 @@ where
     ///
     /// Any handles provided to this function must not be used after constructing the network
     /// stack.
+    ///
+    /// This implementation currently only supports IPv4.
     ///
     /// # Args
     /// * `stack` - The ethernet interface to construct the network stack from.
@@ -92,28 +95,47 @@ where
         // Service the DHCP client.
         if let Some(dhcp_client) = &mut *self.dhcp_client.borrow_mut() {
             let mut interface = self.network_interface.borrow_mut();
-            match dhcp_client.poll(&mut interface, &mut self.sockets.borrow_mut(), now) {
+            let mut sockets = self.sockets.borrow_mut();
+            match dhcp_client.poll(&mut interface, &mut sockets, now) {
                 Ok(Some(config)) => {
                     if let Some(cidr) = config.address {
                         if cidr.address().is_unicast() {
-                            interface.update_ip_addrs(|addrs| {
-                                addrs.iter_mut().next().map(|addr| {
+                            // Note(unwrap): This stack only supports IPv4 and the client must have
+                            // provided an address.
+                            if cidr.address().is_unspecified()
+                                || interface.ipv4_address().unwrap() != cidr.address()
+                            {
+                                // If our address has updated or is not specified, close all
+                                // sockets. Note that we have to ensure that the sockets we borrowed
+                                // earlier are now returned.
+                                drop(sockets);
+                                self.close_sockets();
+
+                                interface.update_ip_addrs(|addrs| {
+                                    // Note(unwrap): This stack requires at least 1 Ipv4 Address.
+                                    let addr = addrs
+                                        .iter_mut()
+                                        .filter(|cidr| match cidr.address() {
+                                            IpAddress::Ipv4(_) => true,
+                                            _ => false,
+                                        })
+                                        .next()
+                                        .unwrap();
+
                                     *addr = IpCidr::Ipv4(cidr);
                                 });
-                            });
+                            }
                         }
-                    }
-
-                    if let Some(route) = config.router {
-                        // TODO: Determine if this unwrap is safe?
-                        interface
-                            .routes_mut()
-                            .add_default_ipv4_route(route)
-                            .unwrap();
                     }
 
                     // Store DNS server addresses for later read-back
                     *self.name_servers.borrow_mut() = config.dns_servers;
+
+                    if let Some(route) = config.router {
+                        // Note: If the user did not provide enough route storage, we may not be
+                        // able to store the gateway.
+                        interface.routes_mut().add_default_ipv4_route(route)?;
+                    }
                 }
                 Ok(None) => {}
                 Err(err) => return Err(err),
@@ -121,6 +143,37 @@ where
         }
 
         Ok(updated)
+    }
+
+    /// Force-close all sockets.
+    pub fn close_sockets(&self) {
+        // Close all sockets.
+        for mut socket in self.sockets.borrow_mut().iter_mut() {
+            // We only explicitly can close TCP sockets because we cannot access other socket types.
+            if let Some(ref mut socket) =
+                smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
+            {
+                socket.abort();
+            }
+        }
+    }
+
+    /// Handle a disconnection of the physical interface.
+    pub fn handle_link_reset(&mut self) {
+        // Reset the DHCP client.
+        if let Some(ref mut client) = *self.dhcp_client.borrow_mut() {
+            client.reset(smoltcp::time::Instant::from_millis(-1));
+        }
+
+        // Close all of the sockets and de-configure the interface.
+        self.close_sockets();
+
+        let mut interface = self.network_interface.borrow_mut();
+        interface.update_ip_addrs(|addrs| {
+            addrs.iter_mut().next().map(|addr| {
+                *addr = IpCidr::Ipv4(Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0));
+            });
+        });
     }
 
     // Get an ephemeral TCP port number.
@@ -200,7 +253,10 @@ where
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
                 internal_socket
                     .connect((address, remote.port()), self.get_ephemeral_port())
-                    .map_err(|_| NetworkError::ConnectionFailure)?;
+                    .or_else(|_| {
+                        self.close(socket)?;
+                        Err(NetworkError::ConnectionFailure)
+                    })?;
                 Ok(socket)
             }
 

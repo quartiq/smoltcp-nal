@@ -73,7 +73,7 @@ where
             network_interface: RefCell::new(stack),
             sockets: RefCell::new(sockets),
             used_ports: RefCell::new(Vec::new()),
-            randomizer: RefCell::new(WyRand::new()),
+            randomizer: RefCell::new(WyRand::new_seed(0)),
             dhcp_client: RefCell::new(dhcp),
             unused_handles: RefCell::new(unused_handles),
             name_servers: RefCell::new([None, None, None]),

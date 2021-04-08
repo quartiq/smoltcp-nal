@@ -95,7 +95,8 @@ where
         // Service the DHCP client.
         if let Some(dhcp_client) = &mut *self.dhcp_client.borrow_mut() {
             let mut interface = self.network_interface.borrow_mut();
-            match dhcp_client.poll(&mut interface, &mut self.sockets.borrow_mut(), now) {
+            let mut sockets = self.sockets.borrow_mut();
+            match dhcp_client.poll(&mut interface, &mut sockets, now) {
                 Ok(Some(config)) => {
                     if let Some(cidr) = config.address {
                         if cidr.address().is_unicast() {
@@ -105,7 +106,9 @@ where
                                 || interface.ipv4_address().unwrap() != cidr.address()
                             {
                                 // If our address has updated or is not specified, close all
-                                // sockets.
+                                // sockets. Note that we have to ensure that the sockets we borrowed
+                                // earlier are now returned.
+                                drop(sockets);
                                 self.close_sockets();
 
                                 interface.update_ip_addrs(|addrs| {

@@ -13,6 +13,11 @@ repository = "https://github.com/quartiq/smoltcp-nal.git"
 heapless = ">=0.6.1"
 embedded-nal = "0.1"
 
+[dependencies.nanorand]
+version = "0.5.2"
+default-features = false
+features = ["wyrand"]
+
 [dependencies.smoltcp]
 version = "0.7"
 features = ["ethernet", "proto-ipv4", "proto-ipv6", "socket-tcp", "proto-dhcpv4"]

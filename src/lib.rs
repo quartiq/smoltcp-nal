@@ -9,6 +9,10 @@ use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
 
 use core::cell::RefCell;
 use heapless::{consts, Vec};
+use nanorand::{wyrand::WyRand, RNG};
+
+// The start of TCP port dynamic range allocation.
+const TCP_PORT_DYNAMIC_RANGE_START: u16 = 49152;
 
 #[derive(Debug)]
 pub enum NetworkError {
@@ -28,8 +32,9 @@ where
     network_interface: RefCell<smoltcp::iface::EthernetInterface<'b, DeviceT>>,
     dhcp_client: RefCell<Option<Dhcpv4Client>>,
     sockets: RefCell<smoltcp::socket::SocketSet<'a>>,
-    next_port: RefCell<u16>,
+    used_ports: RefCell<Vec<u16, consts::U16>>,
     unused_handles: RefCell<Vec<smoltcp::socket::SocketHandle, consts::U16>>,
+    randomizer: RefCell<WyRand>,
     name_servers: RefCell<[Option<smoltcp::wire::Ipv4Address>; 3]>,
 }
 
@@ -70,11 +75,20 @@ where
         NetworkStack {
             network_interface: RefCell::new(stack),
             sockets: RefCell::new(sockets),
+            used_ports: RefCell::new(Vec::new()),
+            randomizer: RefCell::new(WyRand::new_seed(0)),
             dhcp_client: RefCell::new(dhcp),
-            next_port: RefCell::new(49152),
             unused_handles: RefCell::new(unused_handles),
             name_servers: RefCell::new([None, None, None]),
         }
+    }
+
+    /// Seed the TCP port randomizer.
+    ///
+    /// # Args
+    /// * `seed` - A seed of random data to use for randomizing local TCP port selection.
+    pub fn seed_random_port(&mut self, seed: &[u8]) {
+        self.randomizer.borrow_mut().reseed(seed)
     }
 
     /// Poll the network stack for potential updates.
@@ -178,13 +192,26 @@ where
 
     // Get an ephemeral TCP port number.
     fn get_ephemeral_port(&self) -> u16 {
-        // Get the next ephemeral port
-        let current_port = self.next_port.borrow().clone();
+        loop {
+            // Get the next ephemeral port by generating a random, valid TCP port continuously
+            // until an unused port is found.
+            let random_offset = {
+                let random_data = self.randomizer.borrow_mut().rand();
+                u16::from_be_bytes([random_data[0], random_data[1]])
+            };
 
-        let (next, wrap) = self.next_port.borrow().overflowing_add(1);
-        *self.next_port.borrow_mut() = if wrap { 49152 } else { next };
-
-        return current_port;
+            let port = TCP_PORT_DYNAMIC_RANGE_START
+                + random_offset % (u16::MAX - TCP_PORT_DYNAMIC_RANGE_START);
+            if self
+                .used_ports
+                .borrow()
+                .iter()
+                .find(|&x| *x == port)
+                .is_none()
+            {
+                return port;
+            }
+        }
     }
 
     fn is_ip_unspecified(&self) -> bool {
@@ -251,6 +278,12 @@ where
                 let octets = addr.octets();
                 let address =
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
+
+                // Note(unwrap): Only one port is allowed per socket, so this push should never
+                // fail.
+                let local_port = self.get_ephemeral_port();
+                self.used_ports.borrow_mut().push(local_port).unwrap();
+
                 internal_socket
                     .connect((address, remote.port()), self.get_ephemeral_port())
                     .or_else(|_| {
@@ -316,8 +349,18 @@ where
     fn close(&self, socket: smoltcp::socket::SocketHandle) -> Result<(), NetworkError> {
         let mut sockets = self.sockets.borrow_mut();
         let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *sockets.get(socket);
-        internal_socket.close();
 
+        // Remove the bound port from the used_ports buffer.
+        let local_port = internal_socket.local_endpoint().port;
+        let mut used_ports = self.used_ports.borrow_mut();
+
+        let index = used_ports
+            .iter()
+            .position(|&port| port == local_port)
+            .unwrap();
+        used_ports.swap_remove(index);
+
+        internal_socket.close();
         self.unused_handles.borrow_mut().push(socket).unwrap();
         Ok(())
     }

@@ -11,6 +11,9 @@ use core::cell::RefCell;
 use heapless::{consts, Vec};
 use nanorand::{wyrand::WyRand, RNG};
 
+// The start of TCP port dynamic range allocation.
+const TCP_PORT_DYNAMIC_RANGE_START: u16 = 49152;
+
 #[derive(Debug)]
 pub enum NetworkError {
     NoSocket,
@@ -197,7 +200,8 @@ where
                 u16::from_be_bytes([random_data[0], random_data[1]])
             };
 
-            let port = 49152 + random_offset % (u16::MAX - 49152);
+            let port = TCP_PORT_DYNAMIC_RANGE_START
+                + random_offset % (u16::MAX - TCP_PORT_DYNAMIC_RANGE_START);
             if self
                 .used_ports
                 .borrow()
@@ -346,13 +350,15 @@ where
         let mut sockets = self.sockets.borrow_mut();
         let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *sockets.get(socket);
 
-        // Remove the bound port form the used_ports buffer.
+        // Remove the bound port from the used_ports buffer.
         let local_port = internal_socket.local_endpoint().port;
         let mut used_ports = self.used_ports.borrow_mut();
-        used_ports
+
+        let index = used_ports
             .iter()
             .position(|&port| port == local_port)
-            .and_then(|index| Some(used_ports.swap_remove(index)));
+            .unwrap();
+        used_ports.swap_remove(index);
 
         internal_socket.close();
         self.unused_handles.borrow_mut().push(socket).unwrap();

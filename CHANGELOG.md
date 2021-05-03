@@ -7,6 +7,7 @@ This document describes the changes to smoltcp-nal between releases.
   close sockets if local address changes.
 * Upgraded to 0.6.1 of heapless to address security vulnerability
 * Adding support for DHCP IP assignment and management.
+* Fixed bug causing mismatch between ports in used_sockets and actual ports used by sockets
 
 ## Version 0.1.0
 Version 0.1.0 was published on 2021-02-17

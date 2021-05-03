@@ -10,7 +10,7 @@ categories = ["network-programming", "no-std"]
 repository = "https://github.com/quartiq/smoltcp-nal.git"
 
 [dependencies]
-heapless = ">=0.6.1"
+heapless = "0.6.1"
 embedded-nal = "0.1"
 
 [dependencies.nanorand]

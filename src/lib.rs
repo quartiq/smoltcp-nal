@@ -285,7 +285,7 @@ where
                 self.used_ports.borrow_mut().push(local_port).unwrap();
 
                 internal_socket
-                    .connect((address, remote.port()), self.get_ephemeral_port())
+                    .connect((address, remote.port()), local_port)
                     .or_else(|_| {
                         self.close(socket)?;
                         Err(NetworkError::ConnectionFailure)

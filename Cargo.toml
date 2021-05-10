@@ -19,6 +19,7 @@ default-features = false
 features = ["wyrand"]
 
 [dependencies.smoltcp]
-version = "0.7"
-features = ["ethernet", "proto-ipv4", "proto-ipv6", "socket-tcp", "proto-dhcpv4"]
+git = "https://github.com/smoltcp-rs/smoltcp"
+branch = "dhcp-socket"
+features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dhcpv4"]
 default-features = false

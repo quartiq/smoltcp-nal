@@ -372,6 +372,7 @@ where
     }
 }
 
+#[derive(Copy, Debug, Clone)]
 pub struct UdpSocket {
     pub handle: smoltcp::socket::SocketHandle,
     destination: IpEndpoint,

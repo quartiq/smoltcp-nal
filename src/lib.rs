@@ -197,7 +197,7 @@ where
 
             let port = TCP_PORT_DYNAMIC_RANGE_START
                 + random_offset % (u16::MAX - TCP_PORT_DYNAMIC_RANGE_START);
-            if self.used_ports.contains(&port) {
+            if !self.used_ports.contains(&port) {
                 return port;
             }
         }
@@ -246,13 +246,13 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        let local_port = self.get_ephemeral_port();
+        {
+            let internal_socket: &mut smoltcp::socket::TcpSocket = &mut self.sockets.get(*socket);
 
-        let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
-
-        // If we're already in the process of connecting, ignore the request silently.
-        if internal_socket.is_open() {
-            return Ok(());
+            // If we're already in the process of connecting, ignore the request silently.
+            if internal_socket.is_open() {
+                return Ok(());
+            }
         }
 
         match remote.ip() {
@@ -261,10 +261,14 @@ where
                 let address =
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
 
+                let local_port = self.get_ephemeral_port();
+
                 // Note(unwrap): Only one port is allowed per socket, so this insertion should never
                 // fail.
                 self.used_ports.insert(local_port).unwrap();
 
+                let internal_socket: &mut smoltcp::socket::TcpSocket =
+                    &mut *self.sockets.get(*socket);
                 internal_socket
                     .connect((address, remote.port()), local_port)
                     .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))?;

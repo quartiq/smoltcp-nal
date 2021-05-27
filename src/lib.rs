@@ -3,10 +3,10 @@
 pub use embedded_nal;
 pub use smoltcp;
 
-use embedded_nal::TcpClientStack;
+use embedded_nal::{TcpClientStack, UdpClientStack};
 use smoltcp::dhcp::Dhcpv4Client;
 use smoltcp::socket::AnySocket;
-use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
+use smoltcp::wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr};
 
 use heapless::{FnvIndexSet, Vec};
 use nanorand::{wyrand::WyRand, RNG};
@@ -32,8 +32,9 @@ where
     network_interface: smoltcp::iface::EthernetInterface<'b, DeviceT>,
     dhcp_client: Option<Dhcpv4Client>,
     sockets: smoltcp::socket::SocketSet<'a>,
-    used_ports: FnvIndexSet<u16, 16>,
-    unused_handles: Vec<smoltcp::socket::SocketHandle, 16>,
+    used_ports: FnvIndexSet<u16, 32>,
+    unused_tcp_handles: Vec<smoltcp::socket::SocketHandle, 16>,
+    unused_udp_handles: Vec<smoltcp::socket::SocketHandle, 16>,
     randomizer: WyRand,
     name_servers: Vec<Ipv4Address, 3>,
 }
@@ -55,7 +56,6 @@ where
     /// # Args
     /// * `stack` - The ethernet interface to construct the network stack from.
     /// * `sockets` - The socket set to contain any socket state for the stack.
-    /// * `handles` - A list of socket handles that can be used.
     /// * `dhcp` - An optional DHCP client if DHCP usage is desired. If None, DHCP will not be used.
     ///
     /// # Returns
@@ -63,13 +63,21 @@ where
     pub fn new(
         stack: smoltcp::iface::EthernetInterface<'b, DeviceT>,
         sockets: smoltcp::socket::SocketSet<'a>,
-        handles: &[smoltcp::socket::SocketHandle],
         dhcp: Option<Dhcpv4Client>,
     ) -> Self {
-        let mut unused_handles: Vec<smoltcp::socket::SocketHandle, 16> = Vec::new();
-        for handle in handles.iter() {
-            // Note: If the user supplies too many handles, we choose to silently drop them.
-            unused_handles.push(*handle).ok();
+        let mut unused_tcp_handles: Vec<smoltcp::socket::SocketHandle, 16> = Vec::new();
+        let mut unused_udp_handles: Vec<smoltcp::socket::SocketHandle, 16> = Vec::new();
+
+        for socket in sockets.iter() {
+            match socket {
+                smoltcp::socket::Socket::Tcp(sock) => {
+                    unused_tcp_handles.push(sock.handle()).ok();
+                }
+                smoltcp::socket::Socket::Udp(sock) => {
+                    unused_udp_handles.push(sock.handle()).ok();
+                }
+                _ => {}
+            }
         }
 
         NetworkStack {
@@ -78,7 +86,8 @@ where
             used_ports: FnvIndexSet::new(),
             randomizer: WyRand::new_seed(0),
             dhcp_client: dhcp,
-            unused_handles,
+            unused_tcp_handles,
+            unused_udp_handles,
             name_servers: Vec::new(),
         }
     }
@@ -222,7 +231,7 @@ where
             return Err(NetworkError::NoIpAddress);
         }
 
-        match self.unused_handles.pop() {
+        match self.unused_tcp_handles.pop() {
             Some(handle) => {
                 // Abort any active connections on the handle.
                 let internal_socket: &mut smoltcp::socket::TcpSocket =
@@ -333,7 +342,142 @@ where
         self.used_ports.remove(&local_port);
 
         internal_socket.close();
-        self.unused_handles.push(socket).unwrap();
+        self.unused_tcp_handles.push(socket).unwrap();
+        Ok(())
+    }
+}
+
+pub struct UdpSocket {
+    handle: smoltcp::socket::SocketHandle,
+    destination: IpEndpoint,
+}
+
+impl<'a, 'b, DeviceT> UdpClientStack for NetworkStack<'a, 'b, DeviceT>
+where
+    DeviceT: for<'c> smoltcp::phy::Device<'c>,
+{
+    type Error = NetworkError;
+    type UdpSocket = UdpSocket;
+
+    fn socket(&mut self) -> Result<UdpSocket, NetworkError> {
+        // If we do not have a valid IP address yet, do not open the socket.
+        if self.is_ip_unspecified() {
+            return Err(NetworkError::NoIpAddress);
+        }
+
+        // TODO: It would be good to un-bind the socket at this point, but this is not yet exposed
+        // by smoltcp. Refer to https://github.com/smoltcp-rs/smoltcp/issues/475.
+
+        let handle = self
+            .unused_udp_handles
+            .pop()
+            .ok_or(NetworkError::NoSocket)?;
+
+        Ok(UdpSocket {
+            handle,
+            destination: IpEndpoint::UNSPECIFIED,
+        })
+    }
+
+    fn connect(
+        &mut self,
+        socket: &mut UdpSocket,
+        remote: embedded_nal::SocketAddr,
+    ) -> Result<(), NetworkError> {
+        if self.is_ip_unspecified() {
+            return Err(NetworkError::NoIpAddress);
+        }
+        // Store the route for this socket.
+        match remote {
+            embedded_nal::SocketAddr::V4(addr) => {
+                let octets = addr.ip().octets();
+                socket.destination = IpEndpoint::new(
+                    IpAddress::v4(octets[0], octets[1], octets[2], octets[3]),
+                    addr.port(),
+                )
+            }
+
+            // We only support IPv4.
+            _ => return Err(NetworkError::Unsupported),
+        }
+
+        // Select a random port to bind to locally.
+        let local_port = self.get_ephemeral_port();
+
+        let local_address = self
+            .network_interface
+            .ip_addrs()
+            .iter()
+            .filter(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
+            .next()
+            .unwrap()
+            .address();
+
+        let local_endpoint = IpEndpoint::new(local_address, local_port);
+
+        let internal_socket: &mut smoltcp::socket::UdpSocket =
+            &mut *self.sockets.get(socket.handle);
+        internal_socket
+            .bind(local_endpoint)
+            .map_err(|_| NetworkError::ConnectionFailure)?;
+        self.used_ports.insert(local_port).unwrap();
+
+        Ok(())
+    }
+
+    fn send(
+        &mut self,
+        socket: &mut UdpSocket,
+        buffer: &[u8],
+    ) -> embedded_nal::nb::Result<(), NetworkError> {
+        if self.is_ip_unspecified() {
+            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
+        }
+
+        let internal_socket: &mut smoltcp::socket::UdpSocket =
+            &mut *self.sockets.get(socket.handle);
+        internal_socket
+            .send_slice(buffer, socket.destination)
+            .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
+    }
+
+    fn receive(
+        &mut self,
+        socket: &mut UdpSocket,
+        buffer: &mut [u8],
+    ) -> embedded_nal::nb::Result<(usize, embedded_nal::SocketAddr), NetworkError> {
+        if self.is_ip_unspecified() {
+            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
+        }
+
+        let internal_socket: &mut smoltcp::socket::UdpSocket =
+            &mut *self.sockets.get(socket.handle);
+        let (size, source) = internal_socket
+            .recv_slice(buffer)
+            .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))?;
+
+        let source = {
+            let octets = source.addr.as_bytes();
+
+            embedded_nal::SocketAddr::new(
+                embedded_nal::IpAddr::V4(embedded_nal::Ipv4Addr::new(
+                    octets[0], octets[1], octets[2], octets[3],
+                )),
+                source.port,
+            )
+        };
+
+        Ok((size, source))
+    }
+
+    fn close(&mut self, socket: UdpSocket) -> Result<(), NetworkError> {
+        // TODO: It would be good to un-bind the socket at this point, but this is not yet exposed
+        // by smoltcp. Refer to https://github.com/smoltcp-rs/smoltcp/issues/475.
+        let internal_socket: &mut smoltcp::socket::UdpSocket =
+            &mut *self.sockets.get(socket.handle);
+
+        self.used_ports.remove(&internal_socket.endpoint().port);
+
         Ok(())
     }
 }

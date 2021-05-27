@@ -8,7 +8,7 @@ use smoltcp::dhcp::Dhcpv4Client;
 use smoltcp::socket::AnySocket;
 use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
 
-use heapless::Vec;
+use heapless::{FnvIndexSet, Vec};
 use nanorand::{wyrand::WyRand, RNG};
 
 // The start of TCP port dynamic range allocation.
@@ -32,7 +32,7 @@ where
     network_interface: smoltcp::iface::EthernetInterface<'b, DeviceT>,
     dhcp_client: Option<Dhcpv4Client>,
     sockets: smoltcp::socket::SocketSet<'a>,
-    used_ports: Vec<u16, 16>,
+    used_ports: FnvIndexSet<u16, 16>,
     unused_handles: Vec<smoltcp::socket::SocketHandle, 16>,
     randomizer: WyRand,
     name_servers: Vec<Ipv4Address, 3>,
@@ -75,7 +75,7 @@ where
         NetworkStack {
             network_interface: stack,
             sockets,
-            used_ports: Vec::new(),
+            used_ports: FnvIndexSet::new(),
             randomizer: WyRand::new_seed(0),
             dhcp_client: dhcp,
             unused_handles,
@@ -131,11 +131,13 @@ where
 
                     // Store DNS server addresses for later read-back
                     self.name_servers.clear();
-                    config
-                        .dns_servers
-                        .iter()
-                        .filter_map(|server| server.as_ref())
-                        .for_each(|server| self.name_servers.push(*server).unwrap());
+                    for server in config.dns_servers.iter() {
+                        if let Some(server) = server {
+                            // Note(unwrap): The name servers vector is at least as long as the
+                            // number of DNS servers reported via DHCP.
+                            self.name_servers.push(*server).unwrap();
+                        }
+                    }
 
                     if let Some(route) = config.router {
                         // Note: If the user did not provide enough route storage, we may not be
@@ -195,7 +197,7 @@ where
 
             let port = TCP_PORT_DYNAMIC_RANGE_START
                 + random_offset % (u16::MAX - TCP_PORT_DYNAMIC_RANGE_START);
-            if self.used_ports.iter().find(|&x| *x == port).is_none() {
+            if self.used_ports.contains(&port) {
                 return port;
             }
         }
@@ -259,9 +261,9 @@ where
                 let address =
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
 
-                // Note(unwrap): Only one port is allowed per socket, so this push should never
+                // Note(unwrap): Only one port is allowed per socket, so this insertion should never
                 // fail.
-                self.used_ports.push(local_port).unwrap();
+                self.used_ports.insert(local_port).unwrap();
 
                 internal_socket
                     .connect((address, remote.port()), local_port)
@@ -328,12 +330,7 @@ where
         // Remove the bound port from the used_ports buffer.
         let local_port = internal_socket.local_endpoint().port;
 
-        let index = self
-            .used_ports
-            .iter()
-            .position(|&port| port == local_port)
-            .unwrap();
-        self.used_ports.swap_remove(index);
+        self.used_ports.remove(&local_port);
 
         internal_socket.close();
         self.unused_handles.push(socket).unwrap();

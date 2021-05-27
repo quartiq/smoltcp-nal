@@ -164,6 +164,31 @@ where
         Ok(updated)
     }
 
+    pub fn get_remaining_send_buffer(
+        &mut self,
+        handle: smoltcp::socket::SocketHandle,
+    ) -> Result<usize, NetworkError> {
+        for mut socket in self.sockets.iter_mut() {
+            if socket.handle() != handle {
+                continue;
+            }
+
+            if let Some(ref mut socket) =
+                smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
+            {
+                return Ok(socket.send_capacity() - socket.send_queue());
+            }
+
+            if let Some(ref mut socket) =
+                smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
+            {
+                return Ok(socket.payload_send_capacity());
+            }
+        }
+
+        Err(NetworkError::NoSocket)
+    }
+
     /// Force-close all sockets.
     pub fn close_sockets(&mut self) {
         // Close all sockets.
@@ -348,7 +373,7 @@ where
 }
 
 pub struct UdpSocket {
-    handle: smoltcp::socket::SocketHandle,
+    pub handle: smoltcp::socket::SocketHandle,
     destination: IpEndpoint,
 }
 

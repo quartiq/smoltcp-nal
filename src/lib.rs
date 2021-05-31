@@ -164,10 +164,28 @@ where
         Ok(updated)
     }
 
-    pub fn get_remaining_send_buffer(
-        &mut self,
-        handle: smoltcp::socket::SocketHandle,
-    ) -> Result<usize, NetworkError> {
+    pub fn with_udp_socket<F>(&mut self, socket: UdpSocket, mut f: F)
+    where
+        F: FnMut(&mut smoltcp::socket::UdpSocket),
+    {
+        let handle = socket.handle;
+        for mut socket in self.sockets.iter_mut() {
+            if socket.handle() != handle {
+                continue;
+            }
+
+            if let Some(ref mut socket) =
+                smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
+            {
+                f(socket)
+            }
+        }
+    }
+
+    pub fn with_tcp_socket<F>(&mut self, handle: smoltcp::socket::SocketHandle, mut f: F)
+    where
+        F: FnMut(&mut smoltcp::socket::TcpSocket),
+    {
         for mut socket in self.sockets.iter_mut() {
             if socket.handle() != handle {
                 continue;
@@ -176,17 +194,9 @@ where
             if let Some(ref mut socket) =
                 smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
             {
-                return Ok(socket.send_capacity() - socket.send_queue());
-            }
-
-            if let Some(ref mut socket) =
-                smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
-            {
-                return Ok(socket.payload_send_capacity());
+                f(socket)
             }
         }
-
-        Err(NetworkError::NoSocket)
     }
 
     /// Force-close all sockets.

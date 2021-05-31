@@ -164,9 +164,9 @@ where
         Ok(updated)
     }
 
-    pub fn with_udp_socket<F>(&mut self, socket: UdpSocket, mut f: F)
+    pub fn with_udp_socket<F, R>(&mut self, socket: UdpSocket, mut f: F) -> Result<R, NetworkError>
     where
-        F: FnMut(&mut smoltcp::socket::UdpSocket),
+        F: FnMut(&mut smoltcp::socket::UdpSocket) -> R,
     {
         let handle = socket.handle;
         for mut socket in self.sockets.iter_mut() {
@@ -177,14 +177,20 @@ where
             if let Some(ref mut socket) =
                 smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
             {
-                f(socket)
+                return Ok(f(socket));
             }
         }
+
+        Err(NetworkError::NoSocket)
     }
 
-    pub fn with_tcp_socket<F>(&mut self, handle: smoltcp::socket::SocketHandle, mut f: F)
+    pub fn with_tcp_socket<F, R>(
+        &mut self,
+        handle: smoltcp::socket::SocketHandle,
+        mut f: F,
+    ) -> Result<R, NetworkError>
     where
-        F: FnMut(&mut smoltcp::socket::TcpSocket),
+        F: FnMut(&mut smoltcp::socket::TcpSocket) -> R,
     {
         for mut socket in self.sockets.iter_mut() {
             if socket.handle() != handle {
@@ -194,9 +200,11 @@ where
             if let Some(ref mut socket) =
                 smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
             {
-                f(socket)
+                return Ok(f(socket));
             }
         }
+
+        Err(NetworkError::NoSocket)
     }
 
     /// Force-close all sockets.

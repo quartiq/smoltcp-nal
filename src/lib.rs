@@ -97,7 +97,11 @@ where
     /// A boolean indicating if the network stack updated in any way.
     pub fn poll(&mut self, time: u32) -> Result<bool, smoltcp::Error> {
         let now = smoltcp::time::Instant::from_millis(time as i64);
-        let updated = self.network_interface.poll(&mut self.sockets, now)?;
+        let updated = match self.network_interface.poll(&mut self.sockets, now) {
+            // `Unrecognized` packets are not meaningful errors and should not be logged.
+            Err(smoltcp::Error::Unrecognized) => Ok(true),
+            updated => updated,
+        }?;
 
         // Service the DHCP client.
         if let Some(ref mut dhcp_client) = self.dhcp_client {

@@ -436,13 +436,14 @@ where
             return Err(NetworkError::NoIpAddress);
         }
 
-        // TODO: It would be good to un-bind the socket at this point, but this is not yet exposed
-        // by smoltcp. Refer to https://github.com/smoltcp-rs/smoltcp/issues/475.
-
         let handle = self
             .unused_udp_handles
             .pop()
             .ok_or(NetworkError::NoSocket)?;
+
+        // Make sure the socket is in a closed state before handing it to the user.
+        let internal_socket: &mut smoltcp::socket::UdpSocket = &mut *self.sockets.get(handle);
+        internal_socket.close();
 
         Ok(UdpSocket {
             handle,
@@ -542,10 +543,10 @@ where
     }
 
     fn close(&mut self, socket: UdpSocket) -> Result<(), NetworkError> {
-        // TODO: It would be good to un-bind the socket at this point, but this is not yet exposed
-        // by smoltcp. Refer to https://github.com/smoltcp-rs/smoltcp/issues/475.
         let internal_socket: &mut smoltcp::socket::UdpSocket =
             &mut *self.sockets.get(socket.handle);
+
+        internal_socket.close();
 
         self.used_ports.remove(&internal_socket.endpoint().port);
 

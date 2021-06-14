@@ -23,6 +23,12 @@ pub enum NetworkError {
     NoIpAddress,
 }
 
+#[derive(Copy, Debug, Clone)]
+pub struct UdpSocket {
+    handle: smoltcp::socket::SocketHandle,
+    destination: IpEndpoint,
+}
+
 ///! Network abstraction layer for smoltcp.
 pub struct NetworkStack<'a, 'b, DeviceT>
 where
@@ -169,49 +175,6 @@ where
         }
 
         Ok(updated)
-    }
-
-    pub fn with_udp_socket<F, R>(&mut self, socket: UdpSocket, mut f: F) -> Result<R, NetworkError>
-    where
-        F: FnMut(&mut smoltcp::socket::UdpSocket) -> R,
-    {
-        let handle = socket.handle;
-        for mut socket in self.sockets.iter_mut() {
-            if socket.handle() != handle {
-                continue;
-            }
-
-            if let Some(ref mut socket) =
-                smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
-            {
-                return Ok(f(socket));
-            }
-        }
-
-        Err(NetworkError::NoSocket)
-    }
-
-    pub fn with_tcp_socket<F, R>(
-        &mut self,
-        handle: smoltcp::socket::SocketHandle,
-        mut f: F,
-    ) -> Result<R, NetworkError>
-    where
-        F: FnMut(&mut smoltcp::socket::TcpSocket) -> R,
-    {
-        for mut socket in self.sockets.iter_mut() {
-            if socket.handle() != handle {
-                continue;
-            }
-
-            if let Some(ref mut socket) =
-                smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
-            {
-                return Ok(f(socket));
-            }
-        }
-
-        Err(NetworkError::NoSocket)
     }
 
     /// Force-close all sockets.
@@ -412,12 +375,6 @@ where
         self.unused_tcp_handles.push(socket).unwrap();
         Ok(())
     }
-}
-
-#[derive(Copy, Debug, Clone)]
-pub struct UdpSocket {
-    pub handle: smoltcp::socket::SocketHandle,
-    destination: IpEndpoint,
 }
 
 impl<'a, 'b, DeviceT> UdpClientStack for NetworkStack<'a, 'b, DeviceT>

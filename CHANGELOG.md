@@ -10,7 +10,6 @@ This document describes the changes to smoltcp-nal between releases.
 * Fixed bug causing mismatch between ports in used_sockets and actual ports used by sockets
 * Updating `embedded-nal` to 0.6
 * Added UDP client support
-* Added functions to access internal smoltcp sockets.
 
 ## Version 0.1.0
 Version 0.1.0 was published on 2021-02-17

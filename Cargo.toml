@@ -18,8 +18,11 @@ version = "0.5.2"
 default-features = false
 features = ["wyrand"]
 
-[dependencies.smoltcp]
+[patch.crates-io.smoltcp]
 git = "https://github.com/smoltcp-rs/smoltcp"
 branch = "master"
+
+[dependencies.smoltcp]
+version = "0.8"
 features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dhcpv4", "socket-udp"]
 default-features = false

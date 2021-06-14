@@ -78,6 +78,9 @@ where
                     dhcp_handle.replace(sock.handle());
                 }
 
+                // This branch may be enabled through cargo feature unification (e.g. if an
+                // application enables raw-sockets). To accomodate this, we provide a default match
+                // arm.
                 #[allow(unreachable_patterns)]
                 _ => {},
             }

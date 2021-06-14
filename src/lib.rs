@@ -25,7 +25,7 @@ pub enum NetworkError {
 
 #[derive(Copy, Debug, Clone)]
 pub struct UdpSocket {
-    handle: smoltcp::socket::SocketHandle,
+    handle: SocketHandle,
     destination: IpEndpoint,
 }
 
@@ -38,8 +38,8 @@ where
     dhcp_handle: Option<SocketHandle>,
     sockets: smoltcp::socket::SocketSet<'a>,
     used_ports: FnvIndexSet<u16, 32>,
-    unused_tcp_handles: Vec<smoltcp::socket::SocketHandle, 16>,
-    unused_udp_handles: Vec<smoltcp::socket::SocketHandle, 16>,
+    unused_tcp_handles: Vec<SocketHandle, 16>,
+    unused_udp_handles: Vec<SocketHandle, 16>,
     randomizer: WyRand,
     name_servers: Vec<Ipv4Address, 3>,
 }
@@ -68,9 +68,9 @@ where
         stack: smoltcp::iface::Interface<'b, DeviceT>,
         sockets: smoltcp::socket::SocketSet<'a>,
     ) -> Self {
-        let mut unused_tcp_handles: Vec<smoltcp::socket::SocketHandle, 16> = Vec::new();
-        let mut unused_udp_handles: Vec<smoltcp::socket::SocketHandle, 16> = Vec::new();
-        let mut dhcp_handle: Option<smoltcp::socket::SocketHandle> = None;
+        let mut unused_tcp_handles: Vec<SocketHandle, 16> = Vec::new();
+        let mut unused_udp_handles: Vec<SocketHandle, 16> = Vec::new();
+        let mut dhcp_handle: Option<SocketHandle> = None;
 
         for socket in sockets.iter() {
             match socket {

@@ -4,7 +4,7 @@ pub use embedded_nal;
 pub use smoltcp;
 
 use embedded_nal::TcpClientStack;
-use smoltcp::socket::{AnySocket, Dhcpv4Event};
+use smoltcp::socket::{AnySocket, Dhcpv4Event, Dhcpv4Socket, SocketHandle};
 use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
 
 use heapless::{FnvIndexSet, Vec};
@@ -29,10 +29,10 @@ where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
 {
     network_interface: smoltcp::iface::Interface<'b, DeviceT>,
-    dhcp_handle: Option<smoltcp::socket::SocketHandle>,
+    dhcp_handle: Option<SocketHandle>,
     sockets: smoltcp::socket::SocketSet<'a>,
     used_ports: FnvIndexSet<u16, 16>,
-    unused_handles: Vec<smoltcp::socket::SocketHandle, 16>,
+    unused_handles: Vec<SocketHandle, 16>,
     randomizer: WyRand,
     name_servers: Vec<Ipv4Address, 3>,
 }
@@ -62,10 +62,10 @@ where
     pub fn new(
         stack: smoltcp::iface::Interface<'b, DeviceT>,
         sockets: smoltcp::socket::SocketSet<'a>,
-        handles: &[smoltcp::socket::SocketHandle],
-        dhcp: Option<smoltcp::socket::SocketHandle>,
+        handles: &[SocketHandle],
+        dhcp: Option<SocketHandle>,
     ) -> Self {
-        let mut unused_handles: Vec<smoltcp::socket::SocketHandle, 16> = Vec::new();
+        let mut unused_handles: Vec<SocketHandle, 16> = Vec::new();
         for handle in handles.iter() {
             // Note: If the user supplies too many handles, we choose to silently drop them.
             unused_handles.push(*handle).ok();
@@ -102,11 +102,7 @@ where
         if let Some(handle) = self.dhcp_handle {
             let mut close_sockets = false;
 
-            if let Some(event) = self
-                .sockets
-                .get::<smoltcp::socket::Dhcpv4Socket>(handle)
-                .poll()
-            {
+            if let Some(event) = self.sockets.get::<Dhcpv4Socket>(handle).poll() {
                 match event {
                     Dhcpv4Event::Configured(config) => {
                         if config.address.address().is_unicast()
@@ -192,9 +188,7 @@ where
     pub fn handle_link_reset(&mut self) {
         // Reset the DHCP client.
         if let Some(handle) = self.dhcp_handle {
-            self.sockets
-                .get::<smoltcp::socket::Dhcpv4Socket>(handle)
-                .reset();
+            self.sockets.get::<Dhcpv4Socket>(handle).reset();
         }
 
         // Close all of the sockets and de-configure the interface.
@@ -236,9 +230,9 @@ where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
 {
     type Error = NetworkError;
-    type TcpSocket = smoltcp::socket::SocketHandle;
+    type TcpSocket = SocketHandle;
 
-    fn socket(&mut self) -> Result<smoltcp::socket::SocketHandle, NetworkError> {
+    fn socket(&mut self) -> Result<SocketHandle, NetworkError> {
         // If we do not have a valid IP address yet, do not open the socket.
         if self.is_ip_unspecified() {
             return Err(NetworkError::NoIpAddress);
@@ -259,7 +253,7 @@ where
 
     fn connect(
         &mut self,
-        socket: &mut smoltcp::socket::SocketHandle,
+        socket: &mut SocketHandle,
         remote: embedded_nal::SocketAddr,
     ) -> embedded_nal::nb::Result<(), NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -302,10 +296,7 @@ where
         }
     }
 
-    fn is_connected(
-        &mut self,
-        socket: &smoltcp::socket::SocketHandle,
-    ) -> Result<bool, NetworkError> {
+    fn is_connected(&mut self, socket: &SocketHandle) -> Result<bool, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
         // socket.
         if self.is_ip_unspecified() {
@@ -318,7 +309,7 @@ where
 
     fn send(
         &mut self,
-        socket: &mut smoltcp::socket::SocketHandle,
+        socket: &mut SocketHandle,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -335,7 +326,7 @@ where
 
     fn receive(
         &mut self,
-        socket: &mut smoltcp::socket::SocketHandle,
+        socket: &mut SocketHandle,
         buffer: &mut [u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -350,7 +341,7 @@ where
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))
     }
 
-    fn close(&mut self, socket: smoltcp::socket::SocketHandle) -> Result<(), NetworkError> {
+    fn close(&mut self, socket: SocketHandle) -> Result<(), NetworkError> {
         let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket);
 
         // Remove the bound port from the used_ports buffer.

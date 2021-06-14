@@ -82,7 +82,7 @@ where
                 // application enables raw-sockets). To accomodate this, we provide a default match
                 // arm.
                 #[allow(unreachable_patterns)]
-                _ => {},
+                _ => {}
             }
         }
 

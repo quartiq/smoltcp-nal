@@ -4,8 +4,7 @@ pub use embedded_nal;
 pub use smoltcp;
 
 use embedded_nal::TcpClientStack;
-use smoltcp::dhcp::Dhcpv4Client;
-use smoltcp::socket::AnySocket;
+use smoltcp::socket::{AnySocket, Dhcpv4Event, Dhcpv4Socket, SocketHandle};
 use smoltcp::wire::{IpAddress, IpCidr, Ipv4Address, Ipv4Cidr};
 
 use heapless::{FnvIndexSet, Vec};
@@ -29,11 +28,11 @@ pub struct NetworkStack<'a, 'b, DeviceT>
 where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
 {
-    network_interface: smoltcp::iface::EthernetInterface<'b, DeviceT>,
-    dhcp_client: Option<Dhcpv4Client>,
+    network_interface: smoltcp::iface::Interface<'b, DeviceT>,
+    dhcp_handle: Option<SocketHandle>,
     sockets: smoltcp::socket::SocketSet<'a>,
     used_ports: FnvIndexSet<u16, 16>,
-    unused_handles: Vec<smoltcp::socket::SocketHandle, 16>,
+    unused_handles: Vec<SocketHandle, 16>,
     randomizer: WyRand,
     name_servers: Vec<Ipv4Address, 3>,
 }
@@ -61,12 +60,12 @@ where
     /// # Returns
     /// A embedded-nal-compatible network stack.
     pub fn new(
-        stack: smoltcp::iface::EthernetInterface<'b, DeviceT>,
+        stack: smoltcp::iface::Interface<'b, DeviceT>,
         sockets: smoltcp::socket::SocketSet<'a>,
-        handles: &[smoltcp::socket::SocketHandle],
-        dhcp: Option<Dhcpv4Client>,
+        handles: &[SocketHandle],
+        dhcp: Option<SocketHandle>,
     ) -> Self {
-        let mut unused_handles: Vec<smoltcp::socket::SocketHandle, 16> = Vec::new();
+        let mut unused_handles: Vec<SocketHandle, 16> = Vec::new();
         for handle in handles.iter() {
             // Note: If the user supplies too many handles, we choose to silently drop them.
             unused_handles.push(*handle).ok();
@@ -77,7 +76,7 @@ where
             sockets,
             used_ports: FnvIndexSet::new(),
             randomizer: WyRand::new_seed(0),
-            dhcp_client: dhcp,
+            dhcp_handle: dhcp,
             unused_handles,
             name_servers: Vec::new(),
         }
@@ -100,55 +99,56 @@ where
         let updated = self.network_interface.poll(&mut self.sockets, now)?;
 
         // Service the DHCP client.
-        if let Some(ref mut dhcp_client) = self.dhcp_client {
-            match dhcp_client.poll(&mut self.network_interface, &mut self.sockets, now) {
-                Ok(Some(config)) => {
-                    if let Some(cidr) = config.address {
-                        if cidr.address().is_unicast() {
-                            // Note(unwrap): This stack only supports IPv4 and the client must have
-                            // provided an address.
-                            if cidr.address().is_unspecified()
-                                || self.network_interface.ipv4_address().unwrap() != cidr.address()
-                            {
-                                self.close_sockets();
+        if let Some(handle) = self.dhcp_handle {
+            let mut close_sockets = false;
 
-                                self.network_interface.update_ip_addrs(|addrs| {
-                                    // Note(unwrap): This stack requires at least 1 Ipv4 Address.
-                                    let addr = addrs
-                                        .iter_mut()
-                                        .filter(|cidr| match cidr.address() {
-                                            IpAddress::Ipv4(_) => true,
-                                            _ => false,
-                                        })
-                                        .next()
-                                        .unwrap();
+            if let Some(event) = self.sockets.get::<Dhcpv4Socket>(handle).poll() {
+                match event {
+                    Dhcpv4Event::Configured(config) => {
+                        if config.address.address().is_unicast()
+                            && self.network_interface.ipv4_address().unwrap()
+                                != config.address.address()
+                        {
+                            close_sockets = true;
+                            Self::set_ipv4_addr(&mut self.network_interface, config.address);
+                        }
 
-                                    *addr = IpCidr::Ipv4(cidr);
-                                });
+                        // Store DNS server addresses for later read-back
+                        self.name_servers.clear();
+                        for server in config.dns_servers.iter() {
+                            if let Some(server) = server {
+                                // Note(unwrap): The name servers vector is at least as long as the
+                                // number of DNS servers reported via DHCP.
+                                self.name_servers.push(*server).unwrap();
                             }
                         }
-                    }
 
-                    // Store DNS server addresses for later read-back
-                    self.name_servers.clear();
-                    for server in config.dns_servers.iter() {
-                        if let Some(server) = server {
-                            // Note(unwrap): The name servers vector is at least as long as the
-                            // number of DNS servers reported via DHCP.
-                            self.name_servers.push(*server).unwrap();
+                        if let Some(route) = config.router {
+                            // Note: If the user did not provide enough route storage, we may not be
+                            // able to store the gateway.
+                            self.network_interface
+                                .routes_mut()
+                                .add_default_ipv4_route(route)?;
+                        } else {
+                            self.network_interface
+                                .routes_mut()
+                                .remove_default_ipv4_route();
                         }
                     }
-
-                    if let Some(route) = config.router {
-                        // Note: If the user did not provide enough route storage, we may not be
-                        // able to store the gateway.
+                    Dhcpv4Event::Deconfigured => {
                         self.network_interface
                             .routes_mut()
-                            .add_default_ipv4_route(route)?;
+                            .remove_default_ipv4_route();
+                        Self::set_ipv4_addr(
+                            &mut self.network_interface,
+                            Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0),
+                        );
                     }
                 }
-                Ok(None) => {}
-                Err(err) => return Err(err),
+            }
+
+            if close_sockets {
+                self.close_sockets();
             }
         }
 
@@ -168,11 +168,27 @@ where
         }
     }
 
+    fn set_ipv4_addr(interface: &mut smoltcp::iface::Interface<'b, DeviceT>, address: Ipv4Cidr) {
+        interface.update_ip_addrs(|addrs| {
+            // Note(unwrap): This stack requires at least 1 Ipv4 Address.
+            let addr = addrs
+                .iter_mut()
+                .filter(|cidr| match cidr.address() {
+                    IpAddress::Ipv4(_) => true,
+                    _ => false,
+                })
+                .next()
+                .unwrap();
+
+            *addr = IpCidr::Ipv4(address);
+        });
+    }
+
     /// Handle a disconnection of the physical interface.
     pub fn handle_link_reset(&mut self) {
         // Reset the DHCP client.
-        if let Some(ref mut client) = self.dhcp_client {
-            client.reset(smoltcp::time::Instant::from_millis(-1));
+        if let Some(handle) = self.dhcp_handle {
+            self.sockets.get::<Dhcpv4Socket>(handle).reset();
         }
 
         // Close all of the sockets and de-configure the interface.
@@ -214,9 +230,9 @@ where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
 {
     type Error = NetworkError;
-    type TcpSocket = smoltcp::socket::SocketHandle;
+    type TcpSocket = SocketHandle;
 
-    fn socket(&mut self) -> Result<smoltcp::socket::SocketHandle, NetworkError> {
+    fn socket(&mut self) -> Result<SocketHandle, NetworkError> {
         // If we do not have a valid IP address yet, do not open the socket.
         if self.is_ip_unspecified() {
             return Err(NetworkError::NoIpAddress);
@@ -237,7 +253,7 @@ where
 
     fn connect(
         &mut self,
-        socket: &mut smoltcp::socket::SocketHandle,
+        socket: &mut SocketHandle,
         remote: embedded_nal::SocketAddr,
     ) -> embedded_nal::nb::Result<(), NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -280,10 +296,7 @@ where
         }
     }
 
-    fn is_connected(
-        &mut self,
-        socket: &smoltcp::socket::SocketHandle,
-    ) -> Result<bool, NetworkError> {
+    fn is_connected(&mut self, socket: &SocketHandle) -> Result<bool, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
         // socket.
         if self.is_ip_unspecified() {
@@ -296,7 +309,7 @@ where
 
     fn send(
         &mut self,
-        socket: &mut smoltcp::socket::SocketHandle,
+        socket: &mut SocketHandle,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -313,7 +326,7 @@ where
 
     fn receive(
         &mut self,
-        socket: &mut smoltcp::socket::SocketHandle,
+        socket: &mut SocketHandle,
         buffer: &mut [u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -328,7 +341,7 @@ where
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))
     }
 
-    fn close(&mut self, socket: smoltcp::socket::SocketHandle) -> Result<(), NetworkError> {
+    fn close(&mut self, socket: SocketHandle) -> Result<(), NetworkError> {
         let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket);
 
         // Remove the bound port from the used_ports buffer.

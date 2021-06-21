@@ -13,7 +13,7 @@ use nanorand::{wyrand::WyRand, RNG};
 // The start of TCP port dynamic range allocation.
 const TCP_PORT_DYNAMIC_RANGE_START: u16 = 49152;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum NetworkError {
     NoSocket,
     ConnectionFailure,
@@ -23,7 +23,7 @@ pub enum NetworkError {
     NoIpAddress,
 }
 
-#[derive(Copy, Debug, Clone)]
+#[derive(Debug)]
 pub struct UdpSocket {
     handle: SocketHandle,
     destination: IpEndpoint,
@@ -503,6 +503,9 @@ where
         internal_socket.close();
 
         self.used_ports.remove(&internal_socket.endpoint().port);
+
+        // There should always be room to return the socket handle to the unused handle list.
+        self.unused_udp_handles.push(socket.handle).unwrap();
 
         Ok(())
     }

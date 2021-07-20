@@ -7,7 +7,7 @@ use embedded_nal::{TcpClientStack, UdpClientStack};
 use smoltcp::socket::{AnySocket, Dhcpv4Event, Dhcpv4Socket, SocketHandle};
 use smoltcp::wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr};
 
-use heapless::{FnvIndexSet, Vec};
+use heapless::Vec;
 use nanorand::{wyrand::WyRand, RNG};
 
 // The start of TCP port dynamic range allocation.
@@ -37,7 +37,6 @@ where
     network_interface: smoltcp::iface::Interface<'b, DeviceT>,
     dhcp_handle: Option<SocketHandle>,
     sockets: smoltcp::socket::SocketSet<'a>,
-    used_ports: FnvIndexSet<u16, 32>,
     unused_tcp_handles: Vec<SocketHandle, 16>,
     unused_udp_handles: Vec<SocketHandle, 16>,
     randomizer: WyRand,
@@ -95,7 +94,6 @@ where
         NetworkStack {
             network_interface: stack,
             sockets,
-            used_ports: FnvIndexSet::new(),
             randomizer: WyRand::new_seed(0),
             dhcp_handle,
             unused_tcp_handles,
@@ -181,11 +179,16 @@ where
     pub fn close_sockets(&mut self) {
         // Close all sockets.
         for mut socket in self.sockets.iter_mut() {
-            // We only explicitly can close TCP sockets because we cannot access other socket types.
             if let Some(ref mut socket) =
                 smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
             {
                 socket.abort();
+            }
+
+            if let Some(ref mut socket) =
+                smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
+            {
+                socket.close();
             }
         }
     }
@@ -223,7 +226,40 @@ where
         });
     }
 
-    // Get an ephemeral TCP port number.
+    /// Check if a port is currently in use.
+    ///
+    /// # Returns
+    /// True if the port is in use. False otherwise.
+    fn is_port_in_use(&mut self, port: u16) -> bool {
+        for mut socket in self.sockets.iter_mut() {
+            // We only explicitly can close TCP sockets because we cannot access other socket types.
+            if let Some(ref socket) =
+                smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
+            {
+                let endpoint = socket.local_endpoint();
+                if endpoint.is_specified() {
+                    if endpoint.port == port {
+                        return true;
+                    }
+                }
+            }
+
+            if let Some(ref socket) =
+                smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
+            {
+                let endpoint = socket.endpoint();
+                if endpoint.is_specified() {
+                    if endpoint.port == port {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    // Get an ephemeral port number.
     fn get_ephemeral_port(&mut self) -> u16 {
         loop {
             // Get the next ephemeral port by generating a random, valid TCP port continuously
@@ -235,7 +271,7 @@ where
 
             let port = TCP_PORT_DYNAMIC_RANGE_START
                 + random_offset % (u16::MAX - TCP_PORT_DYNAMIC_RANGE_START);
-            if !self.used_ports.contains(&port) {
+            if !self.is_port_in_use(port) {
                 return port;
             }
         }
@@ -300,17 +336,11 @@ where
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
 
                 let local_port = self.get_ephemeral_port();
-
-                // Note(unwrap): Only one port is allowed per socket, so this insertion should never
-                // fail.
-                self.used_ports.insert(local_port).unwrap();
-
                 let internal_socket: &mut smoltcp::socket::TcpSocket =
                     &mut *self.sockets.get(*socket);
                 internal_socket
                     .connect((address, remote.port()), local_port)
-                    .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))?;
-                Ok(())
+                    .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))
             }
 
             // We only support IPv4.
@@ -365,11 +395,6 @@ where
 
     fn close(&mut self, socket: SocketHandle) -> Result<(), NetworkError> {
         let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket);
-
-        // Remove the bound port from the used_ports buffer.
-        let local_port = internal_socket.local_endpoint().port;
-
-        self.used_ports.remove(&local_port);
 
         internal_socket.close();
         self.unused_tcp_handles.push(socket).unwrap();
@@ -446,7 +471,6 @@ where
         internal_socket
             .bind(local_endpoint)
             .map_err(|_| NetworkError::ConnectionFailure)?;
-        self.used_ports.insert(local_port).unwrap();
 
         Ok(())
     }
@@ -501,8 +525,6 @@ where
             &mut *self.sockets.get(socket.handle);
 
         internal_socket.close();
-
-        self.used_ports.remove(&internal_socket.endpoint().port);
 
         // There should always be room to return the socket handle to the unused handle list.
         self.unused_udp_handles.push(socket.handle).unwrap();

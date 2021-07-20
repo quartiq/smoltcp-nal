@@ -29,12 +29,6 @@ pub struct UdpSocket {
     destination: IpEndpoint,
 }
 
-#[derive(Debug)]
-pub struct TcpSocket {
-    handle: SocketHandle,
-    local_port: u16,
-}
-
 ///! Network abstraction layer for smoltcp.
 pub struct NetworkStack<'a, 'b, DeviceT>
 where
@@ -296,9 +290,9 @@ where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
 {
     type Error = NetworkError;
-    type TcpSocket = TcpSocket;
+    type TcpSocket = SocketHandle;
 
-    fn socket(&mut self) -> Result<TcpSocket, NetworkError> {
+    fn socket(&mut self) -> Result<SocketHandle, NetworkError> {
         // If we do not have a valid IP address yet, do not open the socket.
         if self.is_ip_unspecified() {
             return Err(NetworkError::NoIpAddress);
@@ -306,14 +300,12 @@ where
 
         match self.unused_tcp_handles.pop() {
             Some(handle) => {
-                let local_port = self.get_ephemeral_port();
-
                 // Abort any active connections on the handle.
                 let internal_socket: &mut smoltcp::socket::TcpSocket =
                     &mut *self.sockets.get(handle);
                 internal_socket.abort();
 
-                Ok(TcpSocket { handle, local_port })
+                Ok(handle)
             }
             None => Err(NetworkError::NoSocket),
         }
@@ -321,7 +313,7 @@ where
 
     fn connect(
         &mut self,
-        socket: &mut TcpSocket,
+        socket: &mut SocketHandle,
         remote: embedded_nal::SocketAddr,
     ) -> embedded_nal::nb::Result<(), NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -331,8 +323,7 @@ where
         }
 
         {
-            let internal_socket: &mut smoltcp::socket::TcpSocket =
-                &mut self.sockets.get(socket.handle);
+            let internal_socket: &mut smoltcp::socket::TcpSocket = &mut self.sockets.get(*socket);
 
             // If we're already in the process of connecting, ignore the request silently.
             if internal_socket.is_open() {
@@ -346,10 +337,11 @@ where
                 let address =
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
 
+                let local_port = self.get_ephemeral_port();
                 let internal_socket: &mut smoltcp::socket::TcpSocket =
-                    &mut *self.sockets.get(socket.handle);
+                    &mut *self.sockets.get(*socket);
                 internal_socket
-                    .connect((address, remote.port()), socket.local_port)
+                    .connect((address, remote.port()), local_port)
                     .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))
             }
 
@@ -358,20 +350,20 @@ where
         }
     }
 
-    fn is_connected(&mut self, socket: &TcpSocket) -> Result<bool, NetworkError> {
+    fn is_connected(&mut self, socket: &SocketHandle) -> Result<bool, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
         // socket.
         if self.is_ip_unspecified() {
             return Err(NetworkError::NoIpAddress);
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket.handle);
+        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
         Ok(socket.may_send() && socket.may_recv())
     }
 
     fn send(
         &mut self,
-        socket: &mut TcpSocket,
+        socket: &mut SocketHandle,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -380,7 +372,7 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket.handle);
+        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
         socket
             .send_slice(buffer)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
@@ -388,7 +380,7 @@ where
 
     fn receive(
         &mut self,
-        socket: &mut TcpSocket,
+        socket: &mut SocketHandle,
         buffer: &mut [u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -397,18 +389,17 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket.handle);
+        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
         socket
             .recv_slice(buffer)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))
     }
 
-    fn close(&mut self, socket: TcpSocket) -> Result<(), NetworkError> {
-        let internal_socket: &mut smoltcp::socket::TcpSocket =
-            &mut *self.sockets.get(socket.handle);
+    fn close(&mut self, socket: SocketHandle) -> Result<(), NetworkError> {
+        let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket);
 
         internal_socket.close();
-        self.unused_tcp_handles.push(socket.handle).unwrap();
+        self.unused_tcp_handles.push(socket).unwrap();
         Ok(())
     }
 }

@@ -29,6 +29,12 @@ pub struct UdpSocket {
     destination: IpEndpoint,
 }
 
+#[derive(Debug)]
+pub struct TcpSocket {
+    handle: SocketHandle,
+    local_port: u16,
+}
+
 ///! Network abstraction layer for smoltcp.
 pub struct NetworkStack<'a, 'b, DeviceT>
 where
@@ -252,9 +258,9 @@ where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
 {
     type Error = NetworkError;
-    type TcpSocket = SocketHandle;
+    type TcpSocket = TcpSocket;
 
-    fn socket(&mut self) -> Result<SocketHandle, NetworkError> {
+    fn socket(&mut self) -> Result<TcpSocket, NetworkError> {
         // If we do not have a valid IP address yet, do not open the socket.
         if self.is_ip_unspecified() {
             return Err(NetworkError::NoIpAddress);
@@ -262,12 +268,17 @@ where
 
         match self.unused_tcp_handles.pop() {
             Some(handle) => {
+                let local_port = self.get_ephemeral_port();
+                // Note(unwrap): Ever socket gets a single port number. There is always storage for
+                // each port.
+                self.used_ports.insert(local_port).unwrap();
+
                 // Abort any active connections on the handle.
                 let internal_socket: &mut smoltcp::socket::TcpSocket =
                     &mut *self.sockets.get(handle);
                 internal_socket.abort();
 
-                Ok(handle)
+                Ok(TcpSocket { handle, local_port })
             }
             None => Err(NetworkError::NoSocket),
         }
@@ -275,7 +286,7 @@ where
 
     fn connect(
         &mut self,
-        socket: &mut SocketHandle,
+        socket: &mut TcpSocket,
         remote: embedded_nal::SocketAddr,
     ) -> embedded_nal::nb::Result<(), NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -285,7 +296,8 @@ where
         }
 
         {
-            let internal_socket: &mut smoltcp::socket::TcpSocket = &mut self.sockets.get(*socket);
+            let internal_socket: &mut smoltcp::socket::TcpSocket =
+                &mut self.sockets.get(socket.handle);
 
             // If we're already in the process of connecting, ignore the request silently.
             if internal_socket.is_open() {
@@ -299,18 +311,11 @@ where
                 let address =
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
 
-                let local_port = self.get_ephemeral_port();
-
-                // Note(unwrap): Only one port is allowed per socket, so this insertion should never
-                // fail.
-                self.used_ports.insert(local_port).unwrap();
-
                 let internal_socket: &mut smoltcp::socket::TcpSocket =
-                    &mut *self.sockets.get(*socket);
+                    &mut *self.sockets.get(socket.handle);
                 internal_socket
-                    .connect((address, remote.port()), local_port)
-                    .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))?;
-                Ok(())
+                    .connect((address, remote.port()), socket.local_port)
+                    .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))
             }
 
             // We only support IPv4.
@@ -318,20 +323,20 @@ where
         }
     }
 
-    fn is_connected(&mut self, socket: &SocketHandle) -> Result<bool, NetworkError> {
+    fn is_connected(&mut self, socket: &TcpSocket) -> Result<bool, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
         // socket.
         if self.is_ip_unspecified() {
             return Err(NetworkError::NoIpAddress);
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
+        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket.handle);
         Ok(socket.may_send() && socket.may_recv())
     }
 
     fn send(
         &mut self,
-        socket: &mut SocketHandle,
+        socket: &mut TcpSocket,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -340,7 +345,7 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
+        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket.handle);
         socket
             .send_slice(buffer)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
@@ -348,7 +353,7 @@ where
 
     fn receive(
         &mut self,
-        socket: &mut SocketHandle,
+        socket: &mut TcpSocket,
         buffer: &mut [u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
         // If there is no longer an IP address assigned to the interface, do not allow usage of the
@@ -357,22 +362,20 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
+        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket.handle);
         socket
             .recv_slice(buffer)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))
     }
 
-    fn close(&mut self, socket: SocketHandle) -> Result<(), NetworkError> {
-        let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket);
+    fn close(&mut self, socket: TcpSocket) -> Result<(), NetworkError> {
+        let internal_socket: &mut smoltcp::socket::TcpSocket =
+            &mut *self.sockets.get(socket.handle);
 
-        // Remove the bound port from the used_ports buffer.
-        let local_port = internal_socket.local_endpoint().port;
-
-        self.used_ports.remove(&local_port);
+        self.used_ports.remove(&socket.local_port);
 
         internal_socket.close();
-        self.unused_tcp_handles.push(socket).unwrap();
+        self.unused_tcp_handles.push(socket.handle).unwrap();
         Ok(())
     }
 }

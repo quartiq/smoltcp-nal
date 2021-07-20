@@ -226,15 +226,11 @@ where
         });
     }
 
-    /// Get as many used ports as possible.
-    ///
-    /// # Note
-    /// If more than 32 ports are present in the socket set, not all ports will be returned.
+    /// Check if a port is currently in use.
     ///
     /// # Returns
-    /// A list of up to the first 32 ports that are in use.
-    fn get_used_ports(&mut self) -> Vec<u16, 32> {
-        let mut used_ports: Vec<u16, 32> = Vec::new();
+    /// True if the port is in use. False otherwise.
+    fn is_port_in_use(&mut self, port: u16) -> bool {
         for mut socket in self.sockets.iter_mut() {
             // We only explicitly can close TCP sockets because we cannot access other socket types.
             if let Some(ref socket) =
@@ -242,7 +238,9 @@ where
             {
                 let endpoint = socket.local_endpoint();
                 if endpoint.is_specified() {
-                    used_ports.push(endpoint.port).ok();
+                    if endpoint.port == port {
+                        return true;
+                    }
                 }
             }
 
@@ -251,18 +249,18 @@ where
             {
                 let endpoint = socket.endpoint();
                 if endpoint.is_specified() {
-                    used_ports.push(endpoint.port).ok();
+                    if endpoint.port == port {
+                        return true;
+                    }
                 }
             }
         }
 
-        used_ports
+        return false;
     }
 
     // Get an ephemeral port number.
     fn get_ephemeral_port(&mut self) -> u16 {
-        let used_ports = self.get_used_ports();
-
         loop {
             // Get the next ephemeral port by generating a random, valid TCP port continuously
             // until an unused port is found.
@@ -273,7 +271,7 @@ where
 
             let port = TCP_PORT_DYNAMIC_RANGE_START
                 + random_offset % (u16::MAX - TCP_PORT_DYNAMIC_RANGE_START);
-            if !used_ports.contains(&port) {
+            if !self.is_port_in_use(port) {
                 return port;
             }
         }

@@ -269,7 +269,7 @@ where
         match self.unused_tcp_handles.pop() {
             Some(handle) => {
                 let local_port = self.get_ephemeral_port();
-                // Note(unwrap): Ever socket gets a single port number. There is always storage for
+                // Note(unwrap): Every socket gets a single port number. There is always storage for
                 // each port.
                 self.used_ports.insert(local_port).unwrap();
 

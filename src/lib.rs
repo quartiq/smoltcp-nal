@@ -30,6 +30,7 @@ pub struct UdpSocket {
     destination: IpEndpoint,
 }
 
+// Used to facilitate `smoltcp` with an RNG
 struct Rand;
 static mut RAND: WyRand = WyRand::new_seed(0);
 

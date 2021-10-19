@@ -1,6 +1,7 @@
 #![no_std]
 
 pub use embedded_nal;
+use nanorand::Rng;
 pub use smoltcp;
 
 use embedded_nal::{TcpClientStack, UdpClientStack};
@@ -8,7 +9,7 @@ use smoltcp::socket::{AnySocket, Dhcpv4Event, Dhcpv4Socket, SocketHandle};
 use smoltcp::wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr};
 
 use heapless::Vec;
-use nanorand::{wyrand::WyRand, RNG};
+use nanorand::wyrand::WyRand;
 
 // The start of TCP port dynamic range allocation.
 const TCP_PORT_DYNAMIC_RANGE_START: u16 = 49152;
@@ -29,6 +30,23 @@ pub struct UdpSocket {
     destination: IpEndpoint,
 }
 
+// Used to facilitate `smoltcp` with an RNG
+struct Rand;
+static mut RAND: WyRand = WyRand::new_seed(0);
+
+smoltcp::rand_custom_impl!(Rand);
+impl smoltcp::Rand for Rand {
+    fn rand_bytes(buf: &mut [u8]) {
+        buf.chunks_mut(8).for_each(|chunk| {
+            let r = critical_section::with(|_| {
+                let rand = unsafe { &mut RAND };
+                rand.rand()
+            });
+            chunk.copy_from_slice(&r[..chunk.len()]);
+        });
+    }
+}
+
 ///! Network abstraction layer for smoltcp.
 pub struct NetworkStack<'a, 'b, DeviceT>
 where
@@ -39,7 +57,6 @@ where
     sockets: smoltcp::socket::SocketSet<'a>,
     unused_tcp_handles: Vec<SocketHandle, 16>,
     unused_udp_handles: Vec<SocketHandle, 16>,
-    randomizer: WyRand,
     name_servers: Vec<Ipv4Address, 3>,
 }
 
@@ -94,7 +111,6 @@ where
         NetworkStack {
             network_interface: stack,
             sockets,
-            randomizer: WyRand::new_seed(0),
             dhcp_handle,
             unused_tcp_handles,
             unused_udp_handles,
@@ -107,7 +123,10 @@ where
     /// # Args
     /// * `seed` - A seed of random data to use for randomizing local TCP port selection.
     pub fn seed_random_port(&mut self, seed: &[u8]) {
-        self.randomizer.reseed(seed)
+        critical_section::with(|_| {
+            let randomizer = unsafe { &mut RAND };
+            randomizer.reseed(seed);
+        });
     }
 
     /// Poll the network stack for potential updates.
@@ -265,7 +284,10 @@ where
             // Get the next ephemeral port by generating a random, valid TCP port continuously
             // until an unused port is found.
             let random_offset = {
-                let random_data = self.randomizer.rand();
+                let random_data = critical_section::with(|_| {
+                    let rand = unsafe { &mut RAND };
+                    rand.rand()
+                });
                 u16::from_be_bytes([random_data[0], random_data[1]])
             };
 

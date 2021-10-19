@@ -36,10 +36,11 @@ static mut RAND: WyRand = WyRand::new_seed(0);
 smoltcp::rand_custom_impl!(Rand);
 impl smoltcp::Rand for Rand {
     fn rand_bytes(buf: &mut [u8]) {
-        let rand = unsafe { &mut RAND };
-
         buf.chunks_mut(8).for_each(|chunk| {
-            let r = rand.rand();
+            let r = critical_section::with(|_| {
+                let rand = unsafe { &mut RAND };
+                rand.rand()
+            });
             chunk.copy_from_slice(&r[..chunk.len()]);
         });
     }
@@ -121,8 +122,10 @@ where
     /// # Args
     /// * `seed` - A seed of random data to use for randomizing local TCP port selection.
     pub fn seed_random_port(&mut self, seed: &[u8]) {
-        let randomizer = unsafe { &mut RAND };
-        randomizer.reseed(seed)
+        critical_section::with(|_| {
+            let randomizer = unsafe { &mut RAND };
+            randomizer.reseed(seed);
+        });
     }
 
     /// Poll the network stack for potential updates.
@@ -280,8 +283,10 @@ where
             // Get the next ephemeral port by generating a random, valid TCP port continuously
             // until an unused port is found.
             let random_offset = {
-                let randomizer = unsafe { &mut RAND };
-                let random_data = randomizer.rand();
+                let random_data = critical_section::with(|_| {
+                    let rand = unsafe { &mut RAND };
+                    rand.rand()
+                });
                 u16::from_be_bytes([random_data[0], random_data[1]])
             };
 

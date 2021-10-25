@@ -13,6 +13,7 @@ This document describes the changes to smoltcp-nal between releases.
 * Added UDP client support
 * Updated `nanorand` to 0.6
 * Added support for the new `rand` requirement from `smoltcp`
+* Added polling via an `embedded_time::Clock`
 
 ## Version 0.1.0
 Version 0.1.0 was published on 2021-02-17

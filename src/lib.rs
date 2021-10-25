@@ -1,10 +1,12 @@
 #![no_std]
 
+use core::convert::TryFrom;
 pub use embedded_nal;
 use nanorand::Rng;
 pub use smoltcp;
 
 use embedded_nal::{TcpClientStack, UdpClientStack};
+use embedded_time::duration::Milliseconds;
 use smoltcp::socket::{AnySocket, Dhcpv4Event, Dhcpv4Socket, SocketHandle};
 use smoltcp::wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr};
 
@@ -24,6 +26,37 @@ pub enum NetworkError {
     NoIpAddress,
 }
 
+/// Combination error used for polling the network stack
+#[derive(Debug)]
+pub enum Error {
+    Network(smoltcp::Error),
+    Time(embedded_time::TimeError),
+}
+
+impl From<smoltcp::Error> for Error {
+    fn from(e: smoltcp::Error) -> Self {
+        Error::Network(e)
+    }
+}
+
+impl From<embedded_time::TimeError> for Error {
+    fn from(e: embedded_time::TimeError) -> Self {
+        Error::Time(e)
+    }
+}
+
+impl From<embedded_time::clock::Error> for Error {
+    fn from(e: embedded_time::clock::Error) -> Self {
+        Error::Time(e.into())
+    }
+}
+
+impl From<embedded_time::ConversionError> for Error {
+    fn from(e: embedded_time::ConversionError) -> Self {
+        Error::Time(e.into())
+    }
+}
+
 #[derive(Debug)]
 pub struct UdpSocket {
     handle: SocketHandle,
@@ -39,6 +72,8 @@ impl smoltcp::Rand for Rand {
     fn rand_bytes(buf: &mut [u8]) {
         buf.chunks_mut(8).for_each(|chunk| {
             let r = critical_section::with(|_| {
+                // Note(unsafe): We guarantee safe access to the randomizer by using the critical
+                // section above.
                 let rand = unsafe { &mut RAND };
                 rand.rand()
             });
@@ -48,9 +83,11 @@ impl smoltcp::Rand for Rand {
 }
 
 ///! Network abstraction layer for smoltcp.
-pub struct NetworkStack<'a, 'b, DeviceT>
+pub struct NetworkStack<'a, 'b, DeviceT, Clock>
 where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    Clock: embedded_time::Clock,
+    u32: From<Clock::T>,
 {
     network_interface: smoltcp::iface::Interface<'b, DeviceT>,
     dhcp_handle: Option<SocketHandle>,
@@ -58,11 +95,16 @@ where
     unused_tcp_handles: Vec<SocketHandle, 16>,
     unused_udp_handles: Vec<SocketHandle, 16>,
     name_servers: Vec<Ipv4Address, 3>,
+    clock: Clock,
+    last_poll: Option<embedded_time::Instant<Clock>>,
+    stack_time: smoltcp::time::Instant,
 }
 
-impl<'a, 'b, DeviceT> NetworkStack<'a, 'b, DeviceT>
+impl<'a, 'b, DeviceT, Clock> NetworkStack<'a, 'b, DeviceT, Clock>
 where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    Clock: embedded_time::Clock,
+    u32: From<Clock::T>,
 {
     /// Construct a new network stack.
     ///
@@ -77,12 +119,14 @@ where
     /// # Args
     /// * `stack` - The ethernet interface to construct the network stack from.
     /// * `sockets` - The socket set to contain any socket state for the stack.
+    /// * `clock` - A clock to use for determining network time.
     ///
     /// # Returns
     /// A embedded-nal-compatible network stack.
     pub fn new(
         stack: smoltcp::iface::Interface<'b, DeviceT>,
         sockets: smoltcp::socket::SocketSet<'a>,
+        clock: Clock,
     ) -> Self {
         let mut unused_tcp_handles: Vec<SocketHandle, 16> = Vec::new();
         let mut unused_udp_handles: Vec<SocketHandle, 16> = Vec::new();
@@ -115,6 +159,9 @@ where
             unused_tcp_handles,
             unused_udp_handles,
             name_servers: Vec::new(),
+            last_poll: None,
+            clock,
+            stack_time: smoltcp::time::Instant::from_secs(0),
         }
     }
 
@@ -124,6 +171,8 @@ where
     /// * `seed` - A seed of random data to use for randomizing local TCP port selection.
     pub fn seed_random_port(&mut self, seed: &[u8]) {
         critical_section::with(|_| {
+            // Note(unsafe): We guarantee safe access to the randomizer by using the critical
+            // section above.
             let randomizer = unsafe { &mut RAND };
             randomizer.reseed(seed);
         });
@@ -133,9 +182,37 @@ where
     ///
     /// # Returns
     /// A boolean indicating if the network stack updated in any way.
-    pub fn poll(&mut self, time: u32) -> Result<bool, smoltcp::Error> {
-        let now = smoltcp::time::Instant::from_millis(time as i64);
-        let updated = self.network_interface.poll(&mut self.sockets, now)?;
+    pub fn poll(&mut self) -> Result<bool, Error> {
+        let now = self.clock.try_now()?;
+
+        // We can only start using the clock once we call `poll()`, as it may not be initialized
+        // beforehand. In these cases, the last_poll may be uninitialized. If this is the case,
+        // populate it now.
+        if self.last_poll.is_none() {
+            self.last_poll.replace(now);
+        }
+
+        // Note(unwrap): We guarantee that the last_poll value is set above.
+        let elapsed_system_time = now - *self.last_poll.as_ref().unwrap();
+
+        let elapsed_ms: Milliseconds<u32> = Milliseconds::try_from(elapsed_system_time)?;
+
+        if elapsed_ms.0 > 0 {
+            self.stack_time += smoltcp::time::Duration::from_millis(elapsed_ms.0.into());
+
+            // In order to avoid quantization noise, instead of setting the previous poll instant
+            // to the current time, we set it to the last poll instant plus the number of millis
+            // that we incremented smoltcps time by. This ensures that if e.g. we had 1.5 millis
+            // elapse, we don't accidentally discard the 500 microseconds by fast-forwarding
+            // smoltcp by 1ms, but moving our internal timer by 1.5ms.
+            //
+            // Note(unwrap): We guarantee that last_poll is always some time above.
+            self.last_poll.replace(self.last_poll.unwrap() + elapsed_ms);
+        }
+
+        let updated = self
+            .network_interface
+            .poll(&mut self.sockets, self.stack_time)?;
 
         // Service the DHCP client.
         if let Some(handle) = self.dhcp_handle {
@@ -285,6 +362,8 @@ where
             // until an unused port is found.
             let random_offset = {
                 let random_data = critical_section::with(|_| {
+                    // Note(unsafe): We guarantee safe access to the randomizer by using the
+                    // critical section above.
                     let rand = unsafe { &mut RAND };
                     rand.rand()
                 });
@@ -305,9 +384,11 @@ where
     }
 }
 
-impl<'a, 'b, DeviceT> TcpClientStack for NetworkStack<'a, 'b, DeviceT>
+impl<'a, 'b, DeviceT, Clock> TcpClientStack for NetworkStack<'a, 'b, DeviceT, Clock>
 where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    Clock: embedded_time::Clock,
+    u32: From<Clock::T>,
 {
     type Error = NetworkError;
     type TcpSocket = SocketHandle;
@@ -424,9 +505,11 @@ where
     }
 }
 
-impl<'a, 'b, DeviceT> UdpClientStack for NetworkStack<'a, 'b, DeviceT>
+impl<'a, 'b, DeviceT, Clock> UdpClientStack for NetworkStack<'a, 'b, DeviceT, Clock>
 where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    Clock: embedded_time::Clock,
+    u32: From<Clock::T>,
 {
     type Error = NetworkError;
     type UdpSocket = UdpSocket;

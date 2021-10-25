@@ -205,9 +205,9 @@ where
             // that we incremented smoltcps time by. This ensures that if e.g. we had 1.5 millis
             // elapse, we don't accidentally discard the 500 microseconds by fast-forwarding
             // smoltcp by 1ms, but moving our internal timer by 1.5ms.
-            if let Some(last_poll) = self.last_poll {
-                self.last_poll.replace(last_poll + elapsed_ms);
-            }
+            //
+            // Note(unwrap): We guarantee that last_poll is always some time above.
+            self.last_poll.replace(self.last_poll.unwrap() + elapsed_ms);
         }
 
         let updated = self

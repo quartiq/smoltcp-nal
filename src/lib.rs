@@ -96,7 +96,7 @@ where
     unused_udp_handles: Vec<SocketHandle, 16>,
     name_servers: Vec<Ipv4Address, 3>,
     clock: Clock,
-    last_poll: embedded_time::Instant<Clock>,
+    last_poll: Option<embedded_time::Instant<Clock>>,
     stack_time: smoltcp::time::Instant,
 }
 
@@ -127,7 +127,7 @@ where
         stack: smoltcp::iface::Interface<'b, DeviceT>,
         sockets: smoltcp::socket::SocketSet<'a>,
         clock: Clock,
-    ) -> Result<Self, embedded_time::clock::Error> {
+    ) -> Self {
         let mut unused_tcp_handles: Vec<SocketHandle, 16> = Vec::new();
         let mut unused_udp_handles: Vec<SocketHandle, 16> = Vec::new();
         let mut dhcp_handle: Option<SocketHandle> = None;
@@ -152,17 +152,17 @@ where
             }
         }
 
-        Ok(NetworkStack {
+        NetworkStack {
             network_interface: stack,
             sockets,
             dhcp_handle,
             unused_tcp_handles,
             unused_udp_handles,
             name_servers: Vec::new(),
-            last_poll: clock.try_now()?,
+            last_poll: None,
             clock,
             stack_time: smoltcp::time::Instant::from_secs(0),
-        })
+        }
     }
 
     /// Seed the TCP port randomizer.
@@ -183,7 +183,13 @@ where
     /// # Returns
     /// A boolean indicating if the network stack updated in any way.
     pub fn poll(&mut self) -> Result<bool, Error> {
-        let elapsed_system_time = self.clock.try_now()? - self.last_poll;
+        let now = self.clock.try_now()?;
+        let elapsed_system_time = if let Some(last_poll) = self.last_poll {
+            now - last_poll
+        } else {
+            now - now
+        };
+
         let elapsed_ms: Milliseconds<u32> = Milliseconds::try_from(elapsed_system_time)?;
 
         if elapsed_ms.0 > 0 {
@@ -194,7 +200,11 @@ where
             // that we incremented smoltcp's time by. This ensures that if e.g. we had 1.5 millis
             // elapse, we don't accidentally discard the 500 microseconds by fast-forwarding
             // smoltcp by 1ms, but moving our internal timer by 1.5ms.
-            self.last_poll = self.last_poll + elapsed_ms;
+            if let Some(last_poll) = self.last_poll {
+                self.last_poll.replace(last_poll + elapsed_ms);
+            } else {
+                self.last_poll.replace(now);
+            }
         }
 
         let updated = self

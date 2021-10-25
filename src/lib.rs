@@ -184,11 +184,15 @@ where
     /// A boolean indicating if the network stack updated in any way.
     pub fn poll(&mut self) -> Result<bool, Error> {
         let now = self.clock.try_now()?;
-        let elapsed_system_time = if let Some(last_poll) = self.last_poll {
-            now - last_poll
-        } else {
-            now.duration_since_epoch()
-        };
+
+        // We can only start using the clock once we call `poll()`, as it may not be initialized
+        // beforehand. In these cases, the last_poll may be uninitialized. If this is the case,
+        // populate it now.
+        if self.last_poll.is_none() {
+            self.last_poll.replace(now);
+        }
+
+        let elapsed_system_time = now - *self.last_poll.as_ref().unwrap();
 
         let elapsed_ms: Milliseconds<u32> = Milliseconds::try_from(elapsed_system_time)?;
 
@@ -202,8 +206,6 @@ where
             // smoltcp by 1ms, but moving our internal timer by 1.5ms.
             if let Some(last_poll) = self.last_poll {
                 self.last_poll.replace(last_poll + elapsed_ms);
-            } else {
-                self.last_poll.replace(now);
             }
         }
 

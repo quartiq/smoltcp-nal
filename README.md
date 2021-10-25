@@ -5,10 +5,7 @@
 
 An [`embedded-nal`](https://crates.io/crates/embedded-nal) implementation for [`smoltcp`](https://crates.io/crates/smoltcp).
 
-This repository provides an implementation of a TCP-capable network stack that can be used for any
-library that leverages the `embedded-nal`.
+This repository provides an implementation of a TCP- and UDP-capable network stack that can be used
+for any library that leverages the `embedded-nal`.
 
-
-## Limitations
-
-This currently only supports TCP network stacks.
+This crate also supports DHCP management internally if DHCP via smoltcp is used.

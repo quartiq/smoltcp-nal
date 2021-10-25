@@ -187,7 +187,7 @@ where
         let elapsed_system_time = if let Some(last_poll) = self.last_poll {
             now - last_poll
         } else {
-            now - now
+            now.duration_since_epoch()
         };
 
         let elapsed_ms: Milliseconds<u32> = Milliseconds::try_from(elapsed_system_time)?;

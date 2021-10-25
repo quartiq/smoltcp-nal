@@ -192,6 +192,7 @@ where
             self.last_poll.replace(now);
         }
 
+        // Note(unwrap): We guarantee that the last_poll value is set above.
         let elapsed_system_time = now - *self.last_poll.as_ref().unwrap();
 
         let elapsed_ms: Milliseconds<u32> = Milliseconds::try_from(elapsed_system_time)?;

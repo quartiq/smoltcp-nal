@@ -26,3 +26,10 @@ git = "https://github.com/smoltcp-rs/smoltcp"
 rev = "2dfc1598"
 features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dhcpv4", "socket-udp", "rand-custom-impl"]
 default-features = false
+
+[dependencies.shared-bus]
+version = "0.2.2" 
+optional = true
+
+[features]
+shared-cortex-m = ["shared-bus", "shared-bus/cortex-m"]

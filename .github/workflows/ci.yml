@@ -60,7 +60,7 @@ jobs:
       - name: Cargo Doc
         uses: actions-rs/cargo@v1
         with:
-          command: doc
+          command: doc --all-features
 
   audit:
     runs-on: ubuntu-latest

@@ -44,6 +44,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
+          args: --all-features
 
   documentation:
     runs-on: ubuntu-latest
@@ -61,6 +62,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: doc
+          args: --all-features
 
   audit:
     runs-on: ubuntu-latest
@@ -93,18 +95,19 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: check
-          args: --verbose
+          args: --verbose --all-features
 
       - name: Cargo Build
         uses: actions-rs/cargo@v1
         with:
           command: build
+          args: --all-features
 
       - name: Cargo Build [Release]
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release
+          args: --release --all-features
 
       - name: Cargo Build [Examples]
         uses: actions-rs/cargo@v1

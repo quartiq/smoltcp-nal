@@ -13,6 +13,9 @@ use smoltcp::wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr};
 use heapless::Vec;
 use nanorand::wyrand::WyRand;
 
+#[cfg(feature = "shared-stack")]
+pub mod shared;
+
 // The start of TCP port dynamic range allocation.
 const TCP_PORT_DYNAMIC_RANGE_START: u16 = 49152;
 

@@ -13,7 +13,7 @@ use smoltcp::wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr};
 use heapless::Vec;
 use nanorand::wyrand::WyRand;
 
-#[cfg(feature = "shared-cortex-m")]
+#[cfg(feature = "shared-stack")]
 pub mod shared;
 
 // The start of TCP port dynamic range allocation.

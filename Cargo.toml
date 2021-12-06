@@ -31,4 +31,4 @@ version = "0.2.2"
 optional = true
 
 [features]
-shared-cortex-m = ["shared-bus", "shared-bus/cortex-m"]
+shared-stack = ["shared-bus", "shared-bus/cortex-m"]

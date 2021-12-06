@@ -22,7 +22,6 @@ features = ["wyrand"]
 
 [dependencies.smoltcp]
 git = "https://github.com/smoltcp-rs/smoltcp"
-#branch = "master"
 rev = "2dfc1598"
 features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dhcpv4", "socket-udp", "rand-custom-impl"]
 default-features = false

@@ -14,7 +14,7 @@ This document describes the changes to smoltcp-nal between releases.
 * Updated `nanorand` to 0.6
 * Added support for the new `rand` requirement from `smoltcp`
 * Added polling via an `embedded_time::Clock`
-* Added `shared-cortex-m` feature for the new `shared` module
+* Added `shared-stack` feature for the new `shared` module
 
 ## Version 0.1.0
 Version 0.1.0 was published on 2021-02-17

@@ -2,7 +2,7 @@
 //!
 //! # Design
 //! This module provides a mechanism for sharing a single network stack safely between drivers
-//that may or may not execute in multiple contexts. The design copies that of `shared-bus`.
+//! that may or may not execute in multiple contexts. The design copies that of `shared-bus`.
 //!
 //! Specifically, the network stack is stored in a global static singleton and proxies to the
 //! underlying stack are handed out. The proxies provide an identical API for the
@@ -18,13 +18,13 @@
 use shared_bus::{AtomicCheckMutex, BusMutex};
 
 /// A manager for a shared network stack.
-pub struct NetworkManager<'a, 'b, DeviceT, Clock>
+pub struct NetworkManager<'a, DeviceT, Clock>
 where
     DeviceT: for<'c> smoltcp::phy::Device<'c>,
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
-    mutex: AtomicCheckMutex<crate::NetworkStack<'a, 'b, DeviceT, Clock>>,
+    mutex: AtomicCheckMutex<crate::NetworkStack<'a, DeviceT, Clock>>,
 }
 
 /// A basic proxy that references a shared network stack.
@@ -86,9 +86,9 @@ where
     forward! {close(socket: S::UdpSocket) -> Result<(), S::Error>}
 }
 
-impl<'a, 'b, DeviceT, Clock> NetworkManager<'a, 'b, DeviceT, Clock>
+impl<'a, DeviceT, Clock> NetworkManager<'a, DeviceT, Clock>
 where
-    DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    DeviceT: for<'x> smoltcp::phy::Device<'x>,
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
@@ -96,7 +96,7 @@ where
     ///
     /// # Args
     /// * `stack` - The network stack that is being shared.
-    pub fn new(stack: crate::NetworkStack<'a, 'b, DeviceT, Clock>) -> Self {
+    pub fn new(stack: crate::NetworkStack<'a, DeviceT, Clock>) -> Self {
         Self {
             mutex: AtomicCheckMutex::create(stack),
         }
@@ -109,7 +109,7 @@ where
     /// concurrency listed in the description of this file for usage.
     pub fn acquire_stack(
         &'_ self,
-    ) -> NetworkStackProxy<'_, crate::NetworkStack<'a, 'b, DeviceT, Clock>> {
+    ) -> NetworkStackProxy<'_, crate::NetworkStack<'a, DeviceT, Clock>> {
         NetworkStackProxy { mutex: &self.mutex }
     }
 }

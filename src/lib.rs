@@ -7,8 +7,11 @@ pub use smoltcp;
 
 use embedded_nal::{TcpClientStack, UdpClientStack};
 use embedded_time::duration::Milliseconds;
-use smoltcp::socket::{AnySocket, Dhcpv4Event, Dhcpv4Socket, SocketHandle};
-use smoltcp::wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr};
+use smoltcp::{
+    iface::SocketHandle,
+    socket::{Dhcpv4Event, Dhcpv4Socket},
+    wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr},
+};
 
 use heapless::Vec;
 use nanorand::wyrand::WyRand;
@@ -66,46 +69,27 @@ pub struct UdpSocket {
     destination: IpEndpoint,
 }
 
-// Used to facilitate `smoltcp` with an RNG
-struct Rand;
-static mut RAND: WyRand = WyRand::new_seed(0);
-
-smoltcp::rand_custom_impl!(Rand);
-impl smoltcp::Rand for Rand {
-    fn rand_bytes(buf: &mut [u8]) {
-        buf.chunks_mut(8).for_each(|chunk| {
-            let r = critical_section::with(|_| {
-                // Note(unsafe): We guarantee safe access to the randomizer by using the critical
-                // section above.
-                let rand = unsafe { &mut RAND };
-                rand.rand()
-            });
-            chunk.copy_from_slice(&r[..chunk.len()]);
-        });
-    }
-}
-
 ///! Network abstraction layer for smoltcp.
-pub struct NetworkStack<'a, 'b, DeviceT, Clock>
+pub struct NetworkStack<'a, DeviceT, Clock>
 where
-    DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    DeviceT: for<'x> smoltcp::phy::Device<'x>,
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
-    network_interface: smoltcp::iface::Interface<'b, DeviceT>,
+    network_interface: smoltcp::iface::Interface<'a, DeviceT>,
     dhcp_handle: Option<SocketHandle>,
-    sockets: smoltcp::socket::SocketSet<'a>,
     unused_tcp_handles: Vec<SocketHandle, 16>,
     unused_udp_handles: Vec<SocketHandle, 16>,
     name_servers: Vec<Ipv4Address, 3>,
     clock: Clock,
     last_poll: Option<embedded_time::Instant<Clock>>,
     stack_time: smoltcp::time::Instant,
+    rand: WyRand,
 }
 
-impl<'a, 'b, DeviceT, Clock> NetworkStack<'a, 'b, DeviceT, Clock>
+impl<'a, DeviceT, Clock> NetworkStack<'a, DeviceT, Clock>
 where
-    DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    DeviceT: for<'x> smoltcp::phy::Device<'x>,
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
@@ -126,25 +110,21 @@ where
     ///
     /// # Returns
     /// A embedded-nal-compatible network stack.
-    pub fn new(
-        stack: smoltcp::iface::Interface<'b, DeviceT>,
-        sockets: smoltcp::socket::SocketSet<'a>,
-        clock: Clock,
-    ) -> Self {
+    pub fn new(stack: smoltcp::iface::Interface<'a, DeviceT>, clock: Clock) -> Self {
         let mut unused_tcp_handles: Vec<SocketHandle, 16> = Vec::new();
         let mut unused_udp_handles: Vec<SocketHandle, 16> = Vec::new();
         let mut dhcp_handle: Option<SocketHandle> = None;
 
-        for socket in sockets.iter() {
+        for (handle, socket) in stack.sockets() {
             match socket {
-                smoltcp::socket::Socket::Tcp(sock) => {
-                    unused_tcp_handles.push(sock.handle()).ok();
+                smoltcp::socket::Socket::Tcp(_) => {
+                    unused_tcp_handles.push(handle).ok();
                 }
-                smoltcp::socket::Socket::Udp(sock) => {
-                    unused_udp_handles.push(sock.handle()).ok();
+                smoltcp::socket::Socket::Udp(_) => {
+                    unused_udp_handles.push(handle).ok();
                 }
-                smoltcp::socket::Socket::Dhcpv4(sock) => {
-                    dhcp_handle.replace(sock.handle());
+                smoltcp::socket::Socket::Dhcpv4(_) => {
+                    dhcp_handle.replace(handle);
                 }
 
                 // This branch may be enabled through cargo feature unification (e.g. if an
@@ -157,7 +137,6 @@ where
 
         NetworkStack {
             network_interface: stack,
-            sockets,
             dhcp_handle,
             unused_tcp_handles,
             unused_udp_handles,
@@ -165,6 +144,7 @@ where
             last_poll: None,
             clock,
             stack_time: smoltcp::time::Instant::from_secs(0),
+            rand: WyRand::new_seed(0),
         }
     }
 
@@ -173,12 +153,7 @@ where
     /// # Args
     /// * `seed` - A seed of random data to use for randomizing local TCP port selection.
     pub fn seed_random_port(&mut self, seed: &[u8]) {
-        critical_section::with(|_| {
-            // Note(unsafe): We guarantee safe access to the randomizer by using the critical
-            // section above.
-            let randomizer = unsafe { &mut RAND };
-            randomizer.reseed(seed);
-        });
+        self.rand.reseed(seed);
     }
 
     /// Poll the network stack for potential updates.
@@ -213,15 +188,17 @@ where
             self.last_poll.replace(self.last_poll.unwrap() + elapsed_ms);
         }
 
-        let updated = self
-            .network_interface
-            .poll(&mut self.sockets, self.stack_time)?;
+        let updated = self.network_interface.poll(self.stack_time)?;
 
         // Service the DHCP client.
         if let Some(handle) = self.dhcp_handle {
             let mut close_sockets = false;
 
-            if let Some(event) = self.sockets.get::<Dhcpv4Socket>(handle).poll() {
+            if let Some(event) = self
+                .network_interface
+                .get_socket::<Dhcpv4Socket>(handle)
+                .poll()
+            {
                 match event {
                     Dhcpv4Event::Configured(config) => {
                         if config.address.address().is_unicast()
@@ -277,22 +254,21 @@ where
     /// Force-close all sockets.
     pub fn close_sockets(&mut self) {
         // Close all sockets.
-        for mut socket in self.sockets.iter_mut() {
-            if let Some(ref mut socket) =
-                smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
-            {
-                socket.abort();
-            }
+        for (_handle, socket) in self.network_interface.sockets_mut() {
+            match socket {
+                smoltcp::socket::Socket::Udp(sock) => {
+                    sock.close();
+                }
+                smoltcp::socket::Socket::Tcp(sock) => {
+                    sock.abort();
+                }
 
-            if let Some(ref mut socket) =
-                smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
-            {
-                socket.close();
+                _ => {}
             }
         }
     }
 
-    fn set_ipv4_addr(interface: &mut smoltcp::iface::Interface<'b, DeviceT>, address: Ipv4Cidr) {
+    fn set_ipv4_addr(interface: &mut smoltcp::iface::Interface<'a, DeviceT>, address: Ipv4Cidr) {
         interface.update_ip_addrs(|addrs| {
             // Note(unwrap): This stack requires at least 1 Ipv4 Address.
             let addr = addrs
@@ -312,7 +288,9 @@ where
     pub fn handle_link_reset(&mut self) {
         // Reset the DHCP client.
         if let Some(handle) = self.dhcp_handle {
-            self.sockets.get::<Dhcpv4Socket>(handle).reset();
+            self.network_interface
+                .get_socket::<Dhcpv4Socket>(handle)
+                .reset();
         }
 
         // Close all of the sockets and de-configure the interface.
@@ -330,28 +308,25 @@ where
     /// # Returns
     /// True if the port is in use. False otherwise.
     fn is_port_in_use(&mut self, port: u16) -> bool {
-        for mut socket in self.sockets.iter_mut() {
-            // We only explicitly can close TCP sockets because we cannot access other socket types.
-            if let Some(ref socket) =
-                smoltcp::socket::TcpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
-            {
-                let endpoint = socket.local_endpoint();
-                if endpoint.is_specified() {
-                    if endpoint.port == port {
-                        return true;
+        for (_handle, socket) in self.network_interface.sockets_mut() {
+            match socket {
+                smoltcp::socket::Socket::Tcp(sock) => {
+                    let endpoint = sock.local_endpoint();
+                    if endpoint.is_specified() {
+                        if endpoint.port == port {
+                            return true;
+                        }
                     }
                 }
-            }
-
-            if let Some(ref socket) =
-                smoltcp::socket::UdpSocket::downcast(smoltcp::socket::SocketRef::new(&mut socket))
-            {
-                let endpoint = socket.endpoint();
-                if endpoint.is_specified() {
-                    if endpoint.port == port {
-                        return true;
+                smoltcp::socket::Socket::Udp(sock) => {
+                    let endpoint = sock.endpoint();
+                    if endpoint.is_specified() {
+                        if endpoint.port == port {
+                            return true;
+                        }
                     }
                 }
+                _ => {}
             }
         }
 
@@ -364,12 +339,7 @@ where
             // Get the next ephemeral port by generating a random, valid TCP port continuously
             // until an unused port is found.
             let random_offset = {
-                let random_data = critical_section::with(|_| {
-                    // Note(unsafe): We guarantee safe access to the randomizer by using the
-                    // critical section above.
-                    let rand = unsafe { &mut RAND };
-                    rand.rand()
-                });
+                let random_data = self.rand.rand();
                 u16::from_be_bytes([random_data[0], random_data[1]])
             };
 
@@ -387,9 +357,9 @@ where
     }
 }
 
-impl<'a, 'b, DeviceT, Clock> TcpClientStack for NetworkStack<'a, 'b, DeviceT, Clock>
+impl<'a, DeviceT, Clock> TcpClientStack for NetworkStack<'a, DeviceT, Clock>
 where
-    DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    DeviceT: for<'x> smoltcp::phy::Device<'x>,
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
@@ -406,7 +376,7 @@ where
             Some(handle) => {
                 // Abort any active connections on the handle.
                 let internal_socket: &mut smoltcp::socket::TcpSocket =
-                    &mut *self.sockets.get(handle);
+                    self.network_interface.get_socket(handle);
                 internal_socket.abort();
 
                 Ok(handle)
@@ -427,7 +397,9 @@ where
         }
 
         {
-            let internal_socket: &mut smoltcp::socket::TcpSocket = &mut self.sockets.get(*socket);
+            let internal_socket = self
+                .network_interface
+                .get_socket::<smoltcp::socket::TcpSocket>(*socket);
 
             // If we're already in the process of connecting, ignore the request silently.
             if internal_socket.is_open() {
@@ -442,10 +414,11 @@ where
                     smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
 
                 let local_port = self.get_ephemeral_port();
-                let internal_socket: &mut smoltcp::socket::TcpSocket =
-                    &mut *self.sockets.get(*socket);
+                let (internal_socket, context) = self
+                    .network_interface
+                    .get_socket_and_context::<smoltcp::socket::TcpSocket>(*socket);
                 internal_socket
-                    .connect((address, remote.port()), local_port)
+                    .connect(context, (address, remote.port()), local_port)
                     .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))
             }
 
@@ -461,7 +434,7 @@ where
             return Err(NetworkError::NoIpAddress);
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
+        let socket: &mut smoltcp::socket::TcpSocket = self.network_interface.get_socket(*socket);
         Ok(socket.may_send() && socket.may_recv())
     }
 
@@ -476,7 +449,7 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
+        let socket: &mut smoltcp::socket::TcpSocket = self.network_interface.get_socket(*socket);
         socket
             .send_slice(buffer)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
@@ -493,14 +466,15 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        let socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(*socket);
+        let socket: &mut smoltcp::socket::TcpSocket = self.network_interface.get_socket(*socket);
         socket
             .recv_slice(buffer)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))
     }
 
     fn close(&mut self, socket: SocketHandle) -> Result<(), NetworkError> {
-        let internal_socket: &mut smoltcp::socket::TcpSocket = &mut *self.sockets.get(socket);
+        let internal_socket: &mut smoltcp::socket::TcpSocket =
+            self.network_interface.get_socket(socket);
 
         internal_socket.close();
         self.unused_tcp_handles.push(socket).unwrap();
@@ -508,9 +482,9 @@ where
     }
 }
 
-impl<'a, 'b, DeviceT, Clock> UdpClientStack for NetworkStack<'a, 'b, DeviceT, Clock>
+impl<'a, DeviceT, Clock> UdpClientStack for NetworkStack<'a, DeviceT, Clock>
 where
-    DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    DeviceT: for<'x> smoltcp::phy::Device<'x>,
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
@@ -529,7 +503,8 @@ where
             .ok_or(NetworkError::NoSocket)?;
 
         // Make sure the socket is in a closed state before handing it to the user.
-        let internal_socket: &mut smoltcp::socket::UdpSocket = &mut *self.sockets.get(handle);
+        let internal_socket: &mut smoltcp::socket::UdpSocket =
+            self.network_interface.get_socket(handle);
         internal_socket.close();
 
         Ok(UdpSocket {
@@ -575,7 +550,7 @@ where
         let local_endpoint = IpEndpoint::new(local_address, local_port);
 
         let internal_socket: &mut smoltcp::socket::UdpSocket =
-            &mut *self.sockets.get(socket.handle);
+            self.network_interface.get_socket(socket.handle);
         internal_socket
             .bind(local_endpoint)
             .map_err(|_| NetworkError::ConnectionFailure)?;
@@ -593,7 +568,7 @@ where
         }
 
         let internal_socket: &mut smoltcp::socket::UdpSocket =
-            &mut *self.sockets.get(socket.handle);
+            self.network_interface.get_socket(socket.handle);
         internal_socket
             .send_slice(buffer, socket.destination)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
@@ -609,7 +584,7 @@ where
         }
 
         let internal_socket: &mut smoltcp::socket::UdpSocket =
-            &mut *self.sockets.get(socket.handle);
+            self.network_interface.get_socket(socket.handle);
         let (size, source) = internal_socket
             .recv_slice(buffer)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))?;
@@ -630,7 +605,7 @@ where
 
     fn close(&mut self, socket: UdpSocket) -> Result<(), NetworkError> {
         let internal_socket: &mut smoltcp::socket::UdpSocket =
-            &mut *self.sockets.get(socket.handle);
+            self.network_interface.get_socket(socket.handle);
 
         internal_socket.close();
 

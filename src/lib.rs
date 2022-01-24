@@ -91,7 +91,14 @@ where
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
-    network_interface: smoltcp::iface::Interface<'a, DeviceT>,
+    /// Access the underlying network interface.
+    ///
+    /// # Note
+    /// Modification of the underlying network interface may unintentionally interfere with
+    /// operation of this library (e.g. through reset, modification of IP addresses, etc.). Direct
+    /// access to this member should be done with care.
+    pub network_interface: smoltcp::iface::Interface<'a, DeviceT>,
+
     dhcp_handle: Option<SocketHandle>,
     unused_tcp_handles: Vec<SocketHandle, 16>,
     unused_udp_handles: Vec<SocketHandle, 16>,

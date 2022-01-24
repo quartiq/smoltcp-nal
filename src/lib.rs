@@ -91,14 +91,7 @@ where
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
-    /// Access the underlying network interface.
-    ///
-    /// # Note
-    /// Modification of the underlying network interface may unintentionally interfere with
-    /// operation of this library (e.g. through reset, modification of IP addresses, etc.). Direct
-    /// access to this member should be done with care.
-    pub network_interface: smoltcp::iface::Interface<'a, DeviceT>,
-
+    network_interface: smoltcp::iface::Interface<'a, DeviceT>,
     dhcp_handle: Option<SocketHandle>,
     unused_tcp_handles: Vec<SocketHandle, 16>,
     unused_udp_handles: Vec<SocketHandle, 16>,
@@ -322,6 +315,21 @@ where
                 });
             });
         }
+    }
+
+    /// Access the underlying network interface.
+    pub fn interface(&self) -> &smoltcp::iface::Interface<'a, DeviceT> {
+        &self.network_interface
+    }
+
+    /// Mutably access the underlying network interface.
+    ///
+    /// # Note
+    /// Modification of the underlying network interface may unintentionally interfere with
+    /// operation of this library (e.g. through reset, modification of IP addresses, etc.). Direct
+    /// access to this member should be done with care.
+    pub fn interface_mut(&mut self) -> &mut smoltcp::iface::Interface<'a, DeviceT> {
+        &mut self.network_interface
     }
 
     /// Check if a port is currently in use.

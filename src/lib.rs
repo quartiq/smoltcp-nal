@@ -326,8 +326,8 @@ where
     ///
     /// # Note
     /// Modification of the underlying network interface may unintentionally interfere with
-    /// operation of this library (e.g. through reset, modification of IP addresses, etc.). Direct
-    /// access to this member should be done with care.
+    /// operation of this library (e.g. through reset, modification of IP addresses, etc.). Mutable
+    /// access to the interface should be done with care.
     pub fn interface_mut(&mut self) -> &mut smoltcp::iface::Interface<'a, DeviceT> {
         &mut self.network_interface
     }

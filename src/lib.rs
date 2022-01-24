@@ -300,21 +300,21 @@ where
 
     /// Handle a disconnection of the physical interface.
     pub fn handle_link_reset(&mut self) {
+        // Close all of the sockets and de-configure the interface.
+        self.close_sockets();
+
         // Reset the DHCP client.
         if let Some(handle) = self.dhcp_handle {
             self.network_interface
                 .get_socket::<Dhcpv4Socket>(handle)
                 .reset();
-        }
 
-        // Close all of the sockets and de-configure the interface.
-        self.close_sockets();
-
-        self.network_interface.update_ip_addrs(|addrs| {
-            addrs.iter_mut().next().map(|addr| {
-                *addr = IpCidr::Ipv4(Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0));
+            self.network_interface.update_ip_addrs(|addrs| {
+                addrs.iter_mut().next().map(|addr| {
+                    *addr = IpCidr::Ipv4(Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0));
+                });
             });
-        });
+        }
     }
 
     /// Check if a port is currently in use.

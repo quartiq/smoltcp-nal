@@ -26,5 +26,5 @@ This document describes the changes to smoltcp-nal between releases.
 * Initial library release and publish to crates.io
 
 [Unreleased]: https://github.com/quartiq/smoltcp-nal/compare/0.2.0...HEAD
-[0.2.0]: https://github.com/quartiq/smoltcp-nal/tag/0.2.0
-[0.1.0]: https://github.com/quartiq/smoltcp-nal/tag/0.1.0
+[0.2.0]: https://github.com/quartiq/smoltcp-nal/tree/0.2.0
+[0.1.0]: https://github.com/quartiq/smoltcp-nal/tree/0.1.0

@@ -4,6 +4,9 @@ This document describes the changes to smoltcp-nal between releases.
 
 # [Unreleased]
 
+## Fixed
+* Link reset when not using DHCP no longer removes IP address configuration
+
 # [0.2.0] - 2021-12-13
 
 ## Added

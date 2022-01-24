@@ -3,6 +3,8 @@
 This document describes the changes to smoltcp-nal between releases.
 
 # [Unreleased]
+## Added
+* Public access to the smoltcp network interface
 
 # [0.2.0] - 2021-12-13
 

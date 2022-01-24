@@ -317,6 +317,21 @@ where
         }
     }
 
+    /// Access the underlying network interface.
+    pub fn interface(&self) -> &smoltcp::iface::Interface<'a, DeviceT> {
+        &self.network_interface
+    }
+
+    /// Mutably access the underlying network interface.
+    ///
+    /// # Note
+    /// Modification of the underlying network interface may unintentionally interfere with
+    /// operation of this library (e.g. through reset, modification of IP addresses, etc.). Mutable
+    /// access to the interface should be done with care.
+    pub fn interface_mut(&mut self) -> &mut smoltcp::iface::Interface<'a, DeviceT> {
+        &mut self.network_interface
+    }
+
     /// Check if a port is currently in use.
     ///
     /// # Returns

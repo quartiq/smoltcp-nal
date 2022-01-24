@@ -3,6 +3,8 @@
 This document describes the changes to smoltcp-nal between releases.
 
 # [Unreleased]
+## Added
+* Public access to the smoltcp network interface
 
 ## Fixed
 * Link reset when not using DHCP no longer removes IP address configuration

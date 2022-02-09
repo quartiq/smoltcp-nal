@@ -20,7 +20,7 @@ pub use embedded_nal;
 use nanorand::Rng;
 pub use smoltcp;
 
-use embedded_nal::{TcpClientStack, UdpClientStack};
+use embedded_nal::{TcpClientStack, UdpClientStack, UdpFullStack};
 use embedded_time::duration::Milliseconds;
 use smoltcp::{
     iface::SocketHandle,
@@ -642,5 +642,68 @@ where
         self.unused_udp_handles.push(socket.handle).unwrap();
 
         Ok(())
+    }
+}
+
+impl<'a, DeviceT, Clock> UdpFullStack for NetworkStack<'a, DeviceT, Clock>
+where
+    DeviceT: for<'x> smoltcp::phy::Device<'x>,
+    Clock: embedded_time::Clock,
+    u32: From<Clock::T>,
+{
+    /// Bind a UDP socket to a specific port.
+    fn bind(&mut self, socket: &mut UdpSocket, local_port: u16) -> Result<(), NetworkError> {
+        if self.is_ip_unspecified() {
+            return Err(NetworkError::NoIpAddress);
+        }
+
+        let local_address = self
+            .network_interface
+            .ip_addrs()
+            .iter()
+            .filter(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
+            .next()
+            .unwrap()
+            .address();
+
+        let local_endpoint = IpEndpoint::new(local_address, local_port);
+
+        let internal_socket: &mut smoltcp::socket::UdpSocket =
+            self.network_interface.get_socket(socket.handle);
+        internal_socket
+            .bind(local_endpoint)
+            .map_err(|_| NetworkError::ConnectionFailure)?;
+
+        Ok(())
+    }
+
+    /// Send a packet to a remote host/port.
+    fn send_to(
+        &mut self,
+        socket: &mut Self::UdpSocket,
+        remote: embedded_nal::SocketAddr,
+        buffer: &[u8],
+    ) -> embedded_nal::nb::Result<(), NetworkError> {
+        if self.is_ip_unspecified() {
+            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
+        }
+
+        match remote {
+            embedded_nal::SocketAddr::V4(addr) => {
+                let octets = addr.ip().octets();
+                socket.destination = IpEndpoint::new(
+                    IpAddress::v4(octets[0], octets[1], octets[2], octets[3]),
+                    addr.port(),
+                )
+            }
+            // We only support IPv4.
+            _ => return Err(embedded_nal::nb::Error::Other(NetworkError::Unsupported)),
+        }
+
+        let internal_socket: &mut smoltcp::socket::UdpSocket =
+            self.network_interface.get_socket(socket.handle);
+        internal_socket
+            .send_slice(buffer, socket.destination)
+            .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
     }
 }

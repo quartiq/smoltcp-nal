@@ -4,6 +4,8 @@ This document describes the changes to smoltcp-nal between releases.
 
 # [Unreleased]
 ## Added
+* Implemented full UDP socket
+
 ## Fixed
 
 # [0.2.1]

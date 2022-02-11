@@ -86,6 +86,14 @@ where
     forward! {close(socket: S::UdpSocket) -> Result<(), S::Error>}
 }
 
+impl<'a, S> embedded_nal::UdpFullStack for NetworkStackProxy<'a, S>
+where
+    S: embedded_nal::UdpFullStack,
+{
+    forward! {send_to(socket: &mut S::UdpSocket, remote: embedded_nal::SocketAddr, buffer: &[u8]) -> embedded_nal::nb::Result<(), S::Error>}
+    forward! {bind(socket: &mut S::UdpSocket, local_port: u16) -> Result<(), S::Error>}
+}
+
 impl<'a, DeviceT, Clock> NetworkManager<'a, DeviceT, Clock>
 where
     DeviceT: for<'x> smoltcp::phy::Device<'x>,

@@ -661,8 +661,7 @@ where
             .network_interface
             .ip_addrs()
             .iter()
-            .filter(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
-            .next()
+            .find(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
             .unwrap()
             .address();
 
@@ -688,22 +687,22 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        match remote {
+        let destination = match remote {
             embedded_nal::SocketAddr::V4(addr) => {
                 let octets = addr.ip().octets();
-                socket.destination = IpEndpoint::new(
+                IpEndpoint::new(
                     IpAddress::v4(octets[0], octets[1], octets[2], octets[3]),
                     addr.port(),
                 )
             }
             // We only support IPv4.
             _ => return Err(embedded_nal::nb::Error::Other(NetworkError::Unsupported)),
-        }
+        };
 
         let internal_socket: &mut smoltcp::socket::UdpSocket =
             self.network_interface.get_socket(socket.handle);
         internal_socket
-            .send_slice(buffer, socket.destination)
+            .send_slice(buffer, destination)
             .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
     }
 }

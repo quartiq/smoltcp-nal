@@ -18,13 +18,13 @@
 use shared_bus::{AtomicCheckMutex, BusMutex};
 
 /// A manager for a shared network stack.
-pub struct NetworkManager<'a, DeviceT, Clock>
+pub struct NetworkManager<'a, Device, Clock>
 where
-    DeviceT: for<'c> smoltcp::phy::Device<'c>,
+    Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
-    mutex: AtomicCheckMutex<crate::NetworkStack<'a, DeviceT, Clock>>,
+    mutex: AtomicCheckMutex<crate::NetworkStack<'a, Device, Clock>>,
 }
 
 /// A basic proxy that references a shared network stack.
@@ -94,9 +94,9 @@ where
     forward! {bind(socket: &mut S::UdpSocket, local_port: u16) -> Result<(), S::Error>}
 }
 
-impl<'a, DeviceT, Clock> NetworkManager<'a, DeviceT, Clock>
+impl<'a, Device, Clock> NetworkManager<'a, Device, Clock>
 where
-    DeviceT: for<'x> smoltcp::phy::Device<'x>,
+    Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
     u32: From<Clock::T>,
 {
@@ -104,7 +104,7 @@ where
     ///
     /// # Args
     /// * `stack` - The network stack that is being shared.
-    pub fn new(stack: crate::NetworkStack<'a, DeviceT, Clock>) -> Self {
+    pub fn new(stack: crate::NetworkStack<'a, Device, Clock>) -> Self {
         Self {
             mutex: AtomicCheckMutex::create(stack),
         }
@@ -117,7 +117,7 @@ where
     /// concurrency listed in the description of this file for usage.
     pub fn acquire_stack(
         &'_ self,
-    ) -> NetworkStackProxy<'_, crate::NetworkStack<'a, DeviceT, Clock>> {
+    ) -> NetworkStackProxy<'_, crate::NetworkStack<'a, Device, Clock>> {
         NetworkStackProxy { mutex: &self.mutex }
     }
 }

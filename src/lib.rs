@@ -4,6 +4,12 @@
 //! To use this library, first instantiate the [smoltcp::iface::Interface] and add sockets to
 //! it. Once sockets have been added, pass the interface to [NetworkStack::new()].
 //!
+//! # Sharing the Stack
+//! If you have multiple users of the network stack, you can use the [shared::NetworkManager] by
+//! enabling the `shared-stack` feature. Note that this implementation does not employ any mutually
+//! exclusive access mechanism. For information on how to use this manager, refer to
+//! [shared_bus::AtomicCheckMutex]'s documentation.
+//!
 //! When sharing the stack, it is the users responsibility to ensure that access to the network
 //! stack is mutually exclusive. For example, this can be done when using RTIC by storing all of
 //! the resources that use the network stack in a single resource.
@@ -24,6 +30,9 @@ use smoltcp::{
 
 use heapless::Vec;
 use nanorand::wyrand::WyRand;
+
+#[cfg(feature = "shared-stack")]
+pub mod shared;
 
 // The start of TCP port dynamic range allocation.
 const TCP_PORT_DYNAMIC_RANGE_START: u16 = 49152;

@@ -27,3 +27,10 @@ default-features = false
 [patch.crates-io.embedded-nal]
 git = "https://github.com/quartiq/embedded-nal"
 branch = "feature/tcp-updates"
+
+[dependencies.shared-bus]
+version = "0.2.2"
+optional = true
+
+[features]
+shared-stack = ["shared-bus", "shared-bus/cortex-m"]

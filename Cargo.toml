@@ -24,9 +24,6 @@ version = "0.9"
 features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dhcpv4", "socket-udp"]
 default-features = false
 
-[dependencies.shared-bus]
-version = "0.2.2"
-optional = true
-
-[features]
-shared-stack = ["shared-bus", "shared-bus/cortex-m"]
+[patch.crates-io.embedded-nal]
+git = "https://github.com/quartiq/embedded-nal"
+branch = "feature/tcp-updates"

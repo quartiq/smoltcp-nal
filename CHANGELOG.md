@@ -3,11 +3,16 @@
 This document describes the changes to smoltcp-nal between releases.
 
 # [Unreleased]
+
 ## Added
 * Implemented full UDP socket
 * Updated to smoltcp 0.9
 
-## Fixed
+## Removed
+* `shared-stack` has been removed in favor of `embedded-nal`'s implementation.
+
+## Changed
+* TCP now supports `is_open()`, `may_send()`, and `may_receive()` APIs
 
 # [0.2.1]
 ## Added

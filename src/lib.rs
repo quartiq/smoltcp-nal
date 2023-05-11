@@ -381,7 +381,7 @@ where
 
     fn is_ip_unspecified(&self) -> bool {
         // Note(unwrap): This stack only supports Ipv4.
-        self.network_interface.ipv4_addr().unwrap().is_unspecified()
+        self.network_interface.ipv4_addr().map(|ip| ip.is_unspecified()).unwrap_or(true)
     }
 }
 

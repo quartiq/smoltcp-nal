@@ -287,16 +287,13 @@ where
     fn set_ipv4_addr(interface: &mut smoltcp::iface::Interface, address: Ipv4Cidr) {
         interface.update_ip_addrs(|addrs| {
             // Note(unwrap): This stack requires at least 1 Ipv4 Address.
-            let addr = addrs
+            match addrs
                 .iter_mut()
-                .filter(|cidr| match cidr.address() {
-                    IpAddress::Ipv4(_) => true,
-                    _ => false,
-                })
-                .next()
-                .unwrap();
-
-            *addr = IpCidr::Ipv4(address);
+                .find(|cidr| matches!(cidr.address(), IpAddress::Ipv4(_)))
+            {
+                Some(addr) => *addr = IpCidr::Ipv4(address),
+                None => addrs.push(IpCidr::Ipv4(address)).unwrap(),
+            }
         });
     }
 
@@ -310,9 +307,9 @@ where
             self.sockets.get_mut::<dhcpv4::Socket>(handle).reset();
 
             self.network_interface.update_ip_addrs(|addrs| {
-                addrs.iter_mut().next().map(|addr| {
+                if let Some(addr) = addrs.iter_mut().next() {
                     *addr = IpCidr::Ipv4(Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0));
-                });
+                };
             });
         }
     }
@@ -358,7 +355,7 @@ where
             }
         }
 
-        return false;
+        false
     }
 
     // Get an ephemeral port number.
@@ -574,8 +571,7 @@ where
             .network_interface
             .ip_addrs()
             .iter()
-            .filter(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
-            .next()
+            .find(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
             .unwrap()
             .address();
 

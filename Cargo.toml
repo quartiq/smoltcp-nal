@@ -24,8 +24,7 @@ features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dhcpv4", "soc
 default-features = false
 
 [dependencies.embedded-nal]
-git = "https://github.com/quartiq/embedded-nal"
-branch = "feature/tcp-updates"
+path = "../embedded-nal"
 
 [dependencies.shared-bus]
 version = "0.2.2"

@@ -46,11 +46,23 @@ pub enum SmoltcpError {
 pub enum NetworkError {
     NoSocket,
     ConnectionFailure,
-    ReadFailure,
-    WriteFailure,
+    TcpReadFailure(smoltcp::socket::tcp::RecvError),
+    TcpWriteFailure(smoltcp::socket::tcp::SendError),
+    UdpReadFailure(smoltcp::socket::udp::RecvError),
+    UdpWriteFailure(smoltcp::socket::udp::SendError),
     Unsupported,
     NoIpAddress,
     NotConnected,
+}
+
+impl embedded_nal::TcpError for NetworkError {
+    fn kind(&self) -> embedded_nal::TcpErrorKind {
+        match self {
+            NetworkError::TcpReadFailure(_) => embedded_nal::TcpErrorKind::PipeClosed,
+            NetworkError::TcpWriteFailure(_) => embedded_nal::TcpErrorKind::PipeClosed,
+            _ => embedded_nal::TcpErrorKind::Other,
+        }
+    }
 }
 
 impl From<smoltcp::iface::RouteTableFull> for SmoltcpError {
@@ -424,49 +436,42 @@ where
             return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
         }
 
-        {
-            let internal_socket = self.sockets.get::<smoltcp::socket::tcp::Socket>(*socket);
-
-            // If we're already in the process of connecting, ignore the request silently.
-            if internal_socket.is_open() {
-                return Ok(());
-            }
-        }
-
-        match remote.ip() {
+        let dest_addr = match remote.ip() {
             embedded_nal::IpAddr::V4(addr) => {
                 let octets = addr.octets();
-                let address =
-                    smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
-
-                let local_port = self.get_ephemeral_port();
-                let internal_socket = self
-                    .sockets
-                    .get_mut::<smoltcp::socket::tcp::Socket>(*socket);
-                let context = self.network_interface.context();
-                internal_socket
-                    .connect(context, (address, remote.port()), local_port)
-                    .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))
+                smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3])
             }
 
             // We only support IPv4.
-            _ => Err(embedded_nal::nb::Error::Other(NetworkError::Unsupported)),
+            _ => return Err(embedded_nal::nb::Error::Other(NetworkError::Unsupported)),
+        };
+
+        let local_port = self.get_ephemeral_port();
+        let internal_socket = self
+            .sockets
+            .get_mut::<smoltcp::socket::tcp::Socket>(*socket);
+
+        // Check that a connected peer is who is being requested.
+        if internal_socket
+            .remote_endpoint()
+            .map(|endpoint| endpoint.addr != dest_addr.into())
+            .unwrap_or(false)
+        {
+            internal_socket.abort();
         }
-    }
 
-    fn is_open(&mut self, socket: &SocketHandle) -> Result<bool, NetworkError> {
-        let socket: &smoltcp::socket::tcp::Socket = self.sockets.get(*socket);
-        Ok(socket.is_open())
-    }
+        if !internal_socket.is_open() {
+            let context = self.network_interface.context();
+            internal_socket
+                .connect(context, (dest_addr, remote.port()), local_port)
+                .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))?;
+        }
 
-    fn may_send(&mut self, socket: &SocketHandle) -> Result<bool, NetworkError> {
-        let socket: &smoltcp::socket::tcp::Socket = self.sockets.get(*socket);
-        Ok(socket.may_send())
-    }
-
-    fn may_receive(&mut self, socket: &SocketHandle) -> Result<bool, NetworkError> {
-        let socket: &smoltcp::socket::tcp::Socket = self.sockets.get(*socket);
-        Ok(socket.may_recv())
+        if internal_socket.state() == smoltcp::socket::tcp::State::Established {
+            Ok(())
+        } else {
+            Err(embedded_nal::nb::Error::WouldBlock)
+        }
     }
 
     fn send(
@@ -483,7 +488,7 @@ where
         let socket: &mut smoltcp::socket::tcp::Socket = self.sockets.get_mut(*socket);
         socket
             .send_slice(buffer)
-            .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
+            .map_err(|e| embedded_nal::nb::Error::Other(NetworkError::TcpWriteFailure(e)))
     }
 
     fn receive(
@@ -500,7 +505,7 @@ where
         let socket: &mut smoltcp::socket::tcp::Socket = self.sockets.get_mut(*socket);
         socket
             .recv_slice(buffer)
-            .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))
+            .map_err(|e| embedded_nal::nb::Error::Other(NetworkError::TcpReadFailure(e)))
     }
 
     fn close(&mut self, socket: SocketHandle) -> Result<(), NetworkError> {
@@ -600,7 +605,7 @@ where
         let destination = socket.destination.ok_or(NetworkError::NotConnected)?;
         internal_socket
             .send_slice(buffer, destination)
-            .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
+            .map_err(|e| embedded_nal::nb::Error::Other(NetworkError::UdpWriteFailure(e)))
     }
 
     fn receive(
@@ -616,7 +621,7 @@ where
             self.sockets.get_mut(socket.handle);
         let (size, source) = internal_socket
             .recv_slice(buffer)
-            .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ReadFailure))?;
+            .map_err(|e| embedded_nal::nb::Error::Other(NetworkError::UdpReadFailure(e)))?;
 
         let source = {
             let octets = source.addr.as_bytes();
@@ -703,6 +708,6 @@ where
             self.sockets.get_mut(socket.handle);
         internal_socket
             .send_slice(buffer, destination)
-            .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::WriteFailure))
+            .map_err(|e| embedded_nal::nb::Error::Other(NetworkError::UdpWriteFailure(e)))
     }
 }

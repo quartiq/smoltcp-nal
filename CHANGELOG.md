@@ -6,10 +6,10 @@ This document describes the changes to smoltcp-nal between releases.
 
 ## Added
 * Implemented full UDP socket
-* Updated to smoltcp 0.9
+* [breaking] Updated to smoltcp 0.9
 
 ## Changed
-* TCP now supports `is_open()`, `may_send()`, and `may_receive()` APIs
+* [breaking] embedded-nal updated to 0.7
 
 # [0.2.1]
 ## Added

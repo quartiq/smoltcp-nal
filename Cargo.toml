@@ -1,6 +1,6 @@
 [package]
 name = "smoltcp-nal"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Ryan Summers <ryan.summers@vertigo-designs.com>"]
 edition = "2018"
 license = "MIT"
@@ -11,7 +11,7 @@ repository = "https://github.com/quartiq/smoltcp-nal.git"
 
 [dependencies]
 heapless = "0.7"
-embedded-nal = "0.6"
+embedded-nal = "0.7"
 embedded-time = "0.12"
 
 [dependencies.nanorand]

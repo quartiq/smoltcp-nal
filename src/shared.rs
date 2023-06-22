@@ -65,7 +65,6 @@ where
 
     forward! {socket() -> Result<S::TcpSocket, S::Error>}
     forward! {connect(socket: &mut S::TcpSocket, remote: embedded_nal::SocketAddr) -> embedded_nal::nb::Result<(), S::Error>}
-    forward! {is_connected(socket: &S::TcpSocket) -> Result<bool, S::Error>}
     forward! {send(socket: &mut S::TcpSocket, buffer: &[u8]) -> embedded_nal::nb::Result<usize, S::Error>}
     forward! {receive(socket: &mut S::TcpSocket, buffer: &mut [u8]) -> embedded_nal::nb::Result<usize, S::Error>}
     forward! {close(socket: S::TcpSocket) -> Result<(), S::Error>}

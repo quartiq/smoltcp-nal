@@ -45,13 +45,13 @@ pub enum SmoltcpError {
 #[derive(Debug, Copy, Clone)]
 pub enum NetworkError {
     NoSocket,
-    ConnectionFailure,
+    UdpConnectionFailure(smoltcp::socket::udp::BindError),
+    TcpConnectionFailure(smoltcp::socket::tcp::ConnectError),
     TcpReadFailure(smoltcp::socket::tcp::RecvError),
     TcpWriteFailure(smoltcp::socket::tcp::SendError),
     UdpReadFailure(smoltcp::socket::udp::RecvError),
     UdpWriteFailure(smoltcp::socket::udp::SendError),
     Unsupported,
-    NoIpAddress,
     NotConnected,
 }
 
@@ -387,14 +387,6 @@ where
             }
         }
     }
-
-    fn is_ip_unspecified(&self) -> bool {
-        // Note(unwrap): This stack only supports Ipv4.
-        self.network_interface
-            .ipv4_addr()
-            .map(|ip| ip.is_unspecified())
-            .unwrap_or(true)
-    }
 }
 
 impl<'a, Device, Clock> TcpClientStack for NetworkStack<'a, Device, Clock>
@@ -407,11 +399,6 @@ where
     type TcpSocket = SocketHandle;
 
     fn socket(&mut self) -> Result<SocketHandle, NetworkError> {
-        // If we do not have a valid IP address yet, do not open the socket.
-        if self.is_ip_unspecified() {
-            return Err(NetworkError::NoIpAddress);
-        }
-
         match self.unused_tcp_handles.pop() {
             Some(handle) => {
                 // Abort any active connections on the handle.
@@ -430,12 +417,6 @@ where
         socket: &mut SocketHandle,
         remote: embedded_nal::SocketAddr,
     ) -> embedded_nal::nb::Result<(), NetworkError> {
-        // If there is no longer an IP address assigned to the interface, do not allow usage of the
-        // socket.
-        if self.is_ip_unspecified() {
-            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
-        }
-
         let dest_addr = match remote.ip() {
             embedded_nal::IpAddr::V4(addr) => {
                 let octets = addr.octets();
@@ -451,20 +432,13 @@ where
             .sockets
             .get_mut::<smoltcp::socket::tcp::Socket>(*socket);
 
-        // Check that a connected peer is who is being requested.
-        if internal_socket
-            .remote_endpoint()
-            .map(|endpoint| endpoint.addr != dest_addr.into())
-            .unwrap_or(false)
-        {
-            internal_socket.abort();
-        }
-
         if !internal_socket.is_open() {
             let context = self.network_interface.context();
             internal_socket
                 .connect(context, (dest_addr, remote.port()), local_port)
-                .map_err(|_| embedded_nal::nb::Error::Other(NetworkError::ConnectionFailure))?;
+                .map_err(|e| {
+                    embedded_nal::nb::Error::Other(NetworkError::TcpConnectionFailure(e))
+                })?;
         }
 
         if internal_socket.state() == smoltcp::socket::tcp::State::Established {
@@ -479,12 +453,6 @@ where
         socket: &mut SocketHandle,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
-        // If there is no longer an IP address assigned to the interface, do not allow usage of the
-        // socket.
-        if self.is_ip_unspecified() {
-            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
-        }
-
         let socket: &mut smoltcp::socket::tcp::Socket = self.sockets.get_mut(*socket);
         socket
             .send_slice(buffer)
@@ -496,12 +464,6 @@ where
         socket: &mut SocketHandle,
         buffer: &mut [u8],
     ) -> embedded_nal::nb::Result<usize, NetworkError> {
-        // If there is no longer an IP address assigned to the interface, do not allow usage of the
-        // socket.
-        if self.is_ip_unspecified() {
-            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
-        }
-
         let socket: &mut smoltcp::socket::tcp::Socket = self.sockets.get_mut(*socket);
         socket
             .recv_slice(buffer)
@@ -527,11 +489,6 @@ where
     type UdpSocket = UdpSocket;
 
     fn socket(&mut self) -> Result<UdpSocket, NetworkError> {
-        // If we do not have a valid IP address yet, do not open the socket.
-        if self.is_ip_unspecified() {
-            return Err(NetworkError::NoIpAddress);
-        }
-
         let handle = self
             .unused_udp_handles
             .pop()
@@ -552,9 +509,6 @@ where
         socket: &mut UdpSocket,
         remote: embedded_nal::SocketAddr,
     ) -> Result<(), NetworkError> {
-        if self.is_ip_unspecified() {
-            return Err(NetworkError::NoIpAddress);
-        }
         // Store the route for this socket.
         match remote {
             embedded_nal::SocketAddr::V4(addr) => {
@@ -586,7 +540,7 @@ where
             self.sockets.get_mut(socket.handle);
         internal_socket
             .bind(local_endpoint)
-            .map_err(|_| NetworkError::ConnectionFailure)?;
+            .map_err(NetworkError::UdpConnectionFailure)?;
 
         Ok(())
     }
@@ -596,10 +550,6 @@ where
         socket: &mut UdpSocket,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<(), NetworkError> {
-        if self.is_ip_unspecified() {
-            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
-        }
-
         let internal_socket: &mut smoltcp::socket::udp::Socket =
             self.sockets.get_mut(socket.handle);
         let destination = socket.destination.ok_or(NetworkError::NotConnected)?;
@@ -613,10 +563,6 @@ where
         socket: &mut UdpSocket,
         buffer: &mut [u8],
     ) -> embedded_nal::nb::Result<(usize, embedded_nal::SocketAddr), NetworkError> {
-        if self.is_ip_unspecified() {
-            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
-        }
-
         let internal_socket: &mut smoltcp::socket::udp::Socket =
             self.sockets.get_mut(socket.handle);
         let (size, source) = internal_socket
@@ -658,10 +604,6 @@ where
 {
     /// Bind a UDP socket to a specific port.
     fn bind(&mut self, socket: &mut UdpSocket, local_port: u16) -> Result<(), NetworkError> {
-        if self.is_ip_unspecified() {
-            return Err(NetworkError::NoIpAddress);
-        }
-
         let local_address = self
             .network_interface
             .ip_addrs()
@@ -676,7 +618,7 @@ where
             self.sockets.get_mut(socket.handle);
         internal_socket
             .bind(local_endpoint)
-            .map_err(|_| NetworkError::ConnectionFailure)?;
+            .map_err(NetworkError::UdpConnectionFailure)?;
 
         Ok(())
     }
@@ -688,10 +630,6 @@ where
         remote: embedded_nal::SocketAddr,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<(), NetworkError> {
-        if self.is_ip_unspecified() {
-            return Err(embedded_nal::nb::Error::Other(NetworkError::NoIpAddress));
-        }
-
         let destination = match remote {
             embedded_nal::SocketAddr::V4(addr) => {
                 let octets = addr.ip().octets();

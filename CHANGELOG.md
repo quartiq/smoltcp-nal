@@ -2,6 +2,11 @@
 
 This document describes the changes to smoltcp-nal between releases.
 
+# Unreleased
+
+## Changed
+* Updated to smoltcp 0.10
+
 # [0.3.0]
 
 ## Added

@@ -6,7 +6,7 @@ This document describes the changes to smoltcp-nal between releases.
 
 ## Added
 * Implemented full UDP socket
-* [breaking] Updated to smoltcp 0.9
+* [breaking] Updated to smoltcp 0.10
 
 ## Changed
 * [breaking] embedded-nal updated to 0.7

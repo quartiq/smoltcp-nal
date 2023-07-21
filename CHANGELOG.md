@@ -2,11 +2,16 @@
 
 This document describes the changes to smoltcp-nal between releases.
 
+# [0.4.0] - 2023-07-21
+
+## Added
+* Updated to smoltcp 0.10
+
 # [0.3.0]
 
 ## Added
 * Implemented full UDP socket
-* [breaking] Updated to smoltcp 0.10
+* [breaking] Updated to smoltcp 0.9
 
 ## Changed
 * [breaking] embedded-nal updated to 0.7
@@ -39,7 +44,8 @@ This document describes the changes to smoltcp-nal between releases.
 # Version [0.1.0] - 2021-02-17
 * Initial library release and publish to crates.io
 
-[Unreleased]: https://github.com/quartiq/smoltcp-nal/compare/0.3.0...HEAD
+[Unreleased]: https://github.com/quartiq/smoltcp-nal/compare/0.4.0...HEAD
+[0.4.0]: https://github.com/quartiq/smoltcp-nal/tree/0.4.0
 [0.3.0]: https://github.com/quartiq/smoltcp-nal/tree/0.3.0
 [0.2.1]: https://github.com/quartiq/smoltcp-nal/tree/0.2.1
 [0.2.0]: https://github.com/quartiq/smoltcp-nal/tree/0.2.0

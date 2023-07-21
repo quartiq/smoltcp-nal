@@ -570,13 +570,13 @@ where
             .map_err(|e| embedded_nal::nb::Error::Other(NetworkError::UdpReadFailure(e)))?;
 
         let source = {
-            let octets = source.addr.as_bytes();
+            let octets = source.endpoint.addr.as_bytes();
 
             embedded_nal::SocketAddr::new(
                 embedded_nal::IpAddr::V4(embedded_nal::Ipv4Addr::new(
                     octets[0], octets[1], octets[2], octets[3],
                 )),
-                source.port,
+                source.endpoint.port,
             )
         };
 

@@ -116,7 +116,7 @@ where
     sockets: smoltcp::iface::SocketSet<'a>,
     dhcp_handle: Option<SocketHandle>,
     dns_handle: Option<SocketHandle>,
-    dns_lookups: heapless::LinearMap<heapless::String<128>, smoltcp::socket::dns::QueryHandle, 2>,
+    dns_lookups: heapless::LinearMap<heapless::String<255>, smoltcp::socket::dns::QueryHandle, 2>,
     unused_tcp_handles: Vec<SocketHandle, 16>,
     unused_udp_handles: Vec<SocketHandle, 16>,
     clock: Clock,
@@ -697,7 +697,7 @@ where
         let handle = self.dns_handle.ok_or(NetworkError::Unsupported)?;
         let dns_socket: &mut smoltcp::socket::dns::Socket = self.sockets.get_mut(handle);
         let context = self.network_interface.context();
-        let key = heapless::String::from(hostname);
+        let key = heapless::String::try_from(hostname).map_err(|_| NetworkError::Unsupported)?;
 
         if let Some(handle) = self.dns_lookups.get(&key) {
             match dns_socket.get_query_result(*handle) {

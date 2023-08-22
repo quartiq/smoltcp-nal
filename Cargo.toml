@@ -21,7 +21,7 @@ features = ["wyrand"]
 
 [dependencies.smoltcp]
 version = "0.10"
-features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dhcpv4", "socket-udp"]
+features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dns", "socket-dhcpv4", "socket-udp"]
 default-features = false
 
 [dependencies.shared-bus]

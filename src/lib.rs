@@ -45,6 +45,8 @@ pub enum SmoltcpError {
 #[derive(Debug, Copy, Clone)]
 pub enum NetworkError {
     NoSocket,
+    DnsStart(smoltcp::socket::dns::StartQueryError),
+    DnsFailure,
     UdpConnectionFailure(smoltcp::socket::udp::BindError),
     TcpConnectionFailure(smoltcp::socket::tcp::ConnectError),
     TcpReadFailure(smoltcp::socket::tcp::RecvError),
@@ -113,6 +115,8 @@ where
     device: Device,
     sockets: smoltcp::iface::SocketSet<'a>,
     dhcp_handle: Option<SocketHandle>,
+    dns_handle: Option<SocketHandle>,
+    dns_lookups: heapless::LinearMap<heapless::String<128>, smoltcp::socket::dns::QueryHandle, 2>,
     unused_tcp_handles: Vec<SocketHandle, 16>,
     unused_udp_handles: Vec<SocketHandle, 16>,
     clock: Clock,
@@ -152,6 +156,7 @@ where
         let mut unused_tcp_handles: Vec<SocketHandle, 16> = Vec::new();
         let mut unused_udp_handles: Vec<SocketHandle, 16> = Vec::new();
         let mut dhcp_handle: Option<SocketHandle> = None;
+        let mut dns_handle: Option<SocketHandle> = None;
 
         for (handle, socket) in sockets.iter() {
             match socket {
@@ -163,6 +168,9 @@ where
                 }
                 smoltcp::socket::Socket::Dhcpv4(_) => {
                     dhcp_handle.replace(handle);
+                }
+                smoltcp::socket::Socket::Dns(_) => {
+                    dns_handle.replace(handle);
                 }
 
                 // This branch may be enabled through cargo feature unification (e.g. if an
@@ -178,9 +186,11 @@ where
             sockets,
             device,
             dhcp_handle,
+            dns_handle,
             unused_tcp_handles,
             unused_udp_handles,
             last_poll: None,
+            dns_lookups: heapless::LinearMap::new(),
             clock,
             stack_time: smoltcp::time::Instant::from_secs(0),
             rand: WyRand::new_seed(0),
@@ -647,5 +657,55 @@ where
         internal_socket
             .send_slice(buffer, destination)
             .map_err(|e| embedded_nal::nb::Error::Other(NetworkError::UdpWriteFailure(e)))
+    }
+}
+
+impl<'a, Device, Clock> embedded_nal::Dns for NetworkStack<'a, Device, Clock>
+where
+    Device: smoltcp::phy::Device,
+    Clock: embedded_time::Clock,
+    u32: From<Clock::T>,
+{
+    type Error = NetworkError;
+    fn get_host_by_name(&mut self, hostname: &str, _addr_type: embedded_nal::AddrType) -> embedded_nal::nb::Result<embedded_nal::IpAddr, Self::Error> {
+        let handle = self.dns_handle.ok_or(NetworkError::Unsupported)?;
+        let dns_socket: &mut smoltcp::socket::dns::Socket = self.sockets.get_mut(handle);
+        let context = self.network_interface.context();
+        let key = heapless::String::from(hostname);
+
+        if let Some(handle) = self.dns_lookups.get(&key) {
+            match dns_socket.get_query_result(*handle) {
+                Ok(addrs) => {
+                    self.dns_lookups.remove(&key);
+                    let addr = addrs.iter().next().ok_or(NetworkError::DnsFailure)?;
+                    let smoltcp::wire::IpAddress::Ipv4(addr) = addr else {
+                        panic!("Unexpected address return type");
+                    };
+                    return Ok(embedded_nal::IpAddr::V4(addr.0.into()));
+                }
+                Err(smoltcp::socket::dns::GetQueryResultError::Pending) => {},
+                Err(smoltcp::socket::dns::GetQueryResultError::Failed) => {
+                    self.dns_lookups.remove(&key);
+                    return Err(embedded_nal::nb::Error::Other(NetworkError::DnsFailure));
+                },
+            }
+        }
+        else {
+            // TODO: Do we want to use other query types?
+            let dns_query = dns_socket.start_query(context, hostname, smoltcp::wire::DnsQueryType::A).map_err(NetworkError::DnsStart)?;
+            if self.dns_lookups.insert(key, dns_query).is_err() {
+                dns_socket.cancel_query(dns_query);
+                return Err(embedded_nal::nb::Error::Other(NetworkError::Unsupported));
+            }
+        }
+
+        Err(embedded_nal::nb::Error::WouldBlock)
+    }
+
+    fn get_host_by_address(
+        &mut self,
+        _addr: embedded_nal::IpAddr
+    ) -> embedded_nal::nb::Result<embedded_nal::heapless::String<256>, Self::Error> {
+        unimplemented!()
     }
 }

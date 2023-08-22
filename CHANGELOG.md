@@ -2,7 +2,7 @@
 
 This document describes the changes to smoltcp-nal between releases.
 
-# [Unreleased]
+# [0.4.1] - 2023-08-22
 
 ## Added
 * Added support for `embedded_nal::Dns` traits
@@ -49,7 +49,8 @@ This document describes the changes to smoltcp-nal between releases.
 # Version [0.1.0] - 2021-02-17
 * Initial library release and publish to crates.io
 
-[Unreleased]: https://github.com/quartiq/smoltcp-nal/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/quartiq/smoltcp-nal/compare/0.4.1...HEAD
+[0.4.1]: https://github.com/quartiq/smoltcp-nal/tree/0.4.1
 [0.4.0]: https://github.com/quartiq/smoltcp-nal/tree/0.4.0
 [0.3.0]: https://github.com/quartiq/smoltcp-nal/tree/0.3.0
 [0.2.1]: https://github.com/quartiq/smoltcp-nal/tree/0.2.1

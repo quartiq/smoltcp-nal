@@ -304,6 +304,7 @@ where
                 }
                 self.dns_lookups.clear();
 
+                log::info!("Got new DNS server from DHCP: \"{server:?}\"");
                 dns.update_servers(&[server]);
             }
         }
@@ -707,6 +708,7 @@ where
                     let smoltcp::wire::IpAddress::Ipv4(addr) = addr else {
                         panic!("Unexpected address return type");
                     };
+                    log::info!("DNS query for \"{hostname}\" finished: {addr:?}");
                     return Ok(embedded_nal::IpAddr::V4(addr.0.into()));
                 }
                 Err(smoltcp::socket::dns::GetQueryResultError::Pending) => {}
@@ -717,6 +719,7 @@ where
             }
         } else {
             // TODO: Do we want to use other query types?
+            log::info!("Starting DNS query for \"{hostname}\"");
             let dns_query = dns_socket
                 .start_query(context, hostname, smoltcp::wire::DnsQueryType::A)
                 .map_err(NetworkError::DnsStart)?;

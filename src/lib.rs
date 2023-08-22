@@ -244,6 +244,7 @@ where
         // Service the DHCP client.
         if let Some(handle) = self.dhcp_handle {
             let mut close_sockets = false;
+            let mut dns_server = None;
 
             if let Some(event) = self.sockets.get_mut::<dhcpv4::Socket>(handle).poll() {
                 match event {
@@ -254,6 +255,10 @@ where
                         {
                             close_sockets = true;
                             Self::set_ipv4_addr(&mut self.network_interface, config.address);
+                        }
+
+                        if let Some(server) = config.dns_servers.iter().next().map(|ipv4| smoltcp::wire::IpAddress::Ipv4(*ipv4)) {
+                            dns_server.replace(server);
                         }
 
                         if let Some(route) = config.router {
@@ -283,6 +288,11 @@ where
 
             if close_sockets {
                 self.close_sockets();
+            }
+
+            if let Some((server, handle)) = dns_server.zip(self.dns_handle) {
+                let dns = self.sockets.get_mut::<smoltcp::socket::dns::Socket>(handle);
+                dns.update_servers(&[server]);
             }
         }
 

@@ -92,6 +92,15 @@ where
     forward! {send_to(socket: &mut S::UdpSocket, remote: embedded_nal::SocketAddr, buffer: &[u8]) -> embedded_nal::nb::Result<(), S::Error>}
     forward! {bind(socket: &mut S::UdpSocket, local_port: u16) -> Result<(), S::Error>}
 }
+impl<'a, S> embedded_nal::Dns for NetworkStackProxy<'a, S>
+where
+    S: embedded_nal::Dns,
+{
+    type Error = S::Error;
+
+    forward! {get_host_by_name(hostname: &str, addr_type: embedded_nal::AddrType) -> embedded_nal::nb::Result<embedded_nal::IpAddr, Self::Error>}
+    forward! {get_host_by_address(addr: embedded_nal::IpAddr) -> embedded_nal::nb::Result<embedded_nal::heapless::String<256>, Self::Error>}
+}
 
 impl<'a, Device, Clock> NetworkManager<'a, Device, Clock>
 where

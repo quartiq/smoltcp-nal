@@ -257,7 +257,12 @@ where
                             Self::set_ipv4_addr(&mut self.network_interface, config.address);
                         }
 
-                        if let Some(server) = config.dns_servers.iter().next().map(|ipv4| smoltcp::wire::IpAddress::Ipv4(*ipv4)) {
+                        if let Some(server) = config
+                            .dns_servers
+                            .iter()
+                            .next()
+                            .map(|ipv4| smoltcp::wire::IpAddress::Ipv4(*ipv4))
+                        {
                             dns_server.replace(server);
                         }
 
@@ -292,6 +297,13 @@ where
 
             if let Some((server, handle)) = dns_server.zip(self.dns_handle) {
                 let dns = self.sockets.get_mut::<smoltcp::socket::dns::Socket>(handle);
+
+                // Clear out all pending DNS queries now that we have a new server.
+                for (_query, handle) in self.dns_lookups.iter() {
+                    dns.cancel_query(*handle);
+                }
+                self.dns_lookups.clear();
+
                 dns.update_servers(&[server]);
             }
         }
@@ -677,7 +689,11 @@ where
     u32: From<Clock::T>,
 {
     type Error = NetworkError;
-    fn get_host_by_name(&mut self, hostname: &str, _addr_type: embedded_nal::AddrType) -> embedded_nal::nb::Result<embedded_nal::IpAddr, Self::Error> {
+    fn get_host_by_name(
+        &mut self,
+        hostname: &str,
+        _addr_type: embedded_nal::AddrType,
+    ) -> embedded_nal::nb::Result<embedded_nal::IpAddr, Self::Error> {
         let handle = self.dns_handle.ok_or(NetworkError::Unsupported)?;
         let dns_socket: &mut smoltcp::socket::dns::Socket = self.sockets.get_mut(handle);
         let context = self.network_interface.context();
@@ -693,16 +709,17 @@ where
                     };
                     return Ok(embedded_nal::IpAddr::V4(addr.0.into()));
                 }
-                Err(smoltcp::socket::dns::GetQueryResultError::Pending) => {},
+                Err(smoltcp::socket::dns::GetQueryResultError::Pending) => {}
                 Err(smoltcp::socket::dns::GetQueryResultError::Failed) => {
                     self.dns_lookups.remove(&key);
                     return Err(embedded_nal::nb::Error::Other(NetworkError::DnsFailure));
-                },
+                }
             }
-        }
-        else {
+        } else {
             // TODO: Do we want to use other query types?
-            let dns_query = dns_socket.start_query(context, hostname, smoltcp::wire::DnsQueryType::A).map_err(NetworkError::DnsStart)?;
+            let dns_query = dns_socket
+                .start_query(context, hostname, smoltcp::wire::DnsQueryType::A)
+                .map_err(NetworkError::DnsStart)?;
             if self.dns_lookups.insert(key, dns_query).is_err() {
                 dns_socket.cancel_query(dns_query);
                 return Err(embedded_nal::nb::Error::Other(NetworkError::Unsupported));
@@ -714,7 +731,7 @@ where
 
     fn get_host_by_address(
         &mut self,
-        _addr: embedded_nal::IpAddr
+        _addr: embedded_nal::IpAddr,
     ) -> embedded_nal::nb::Result<embedded_nal::heapless::String<256>, Self::Error> {
         unimplemented!()
     }

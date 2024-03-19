@@ -20,7 +20,7 @@ default-features = false
 features = ["wyrand"]
 
 [dependencies.smoltcp]
-version = "0.10"
+version = "0.11"
 features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dns", "socket-dhcpv4", "socket-udp"]
 default-features = false
 

@@ -54,6 +54,13 @@ macro_rules! forward {
         }
     }
 }
+macro_rules! forward_ref {
+    ($func:ident($($v:ident: $IT:ty),*) -> $T:ty) => {
+        fn $func(&self, $($v: $IT),*) -> $T {
+            self.mutex.lock(|stack| stack.$func($($v),*))
+        }
+    }
+}
 
 // Implement a TCP stack for the proxy if the underlying network stack implements it.
 impl<'a, S> embedded_nal::TcpClientStack for NetworkStackProxy<'a, S>
@@ -99,7 +106,7 @@ where
     type Error = S::Error;
 
     forward! {get_host_by_name(hostname: &str, addr_type: embedded_nal::AddrType) -> embedded_nal::nb::Result<embedded_nal::IpAddr, Self::Error>}
-    forward! {get_host_by_address(addr: embedded_nal::IpAddr) -> embedded_nal::nb::Result<embedded_nal::heapless::String<256>, Self::Error>}
+    forward_ref! {get_host_by_address(addr: embedded_nal::IpAddr, result: &mut [u8]) -> Result<usize, Self::Error>}
 }
 
 impl<'a, Device, Clock> NetworkManager<'a, Device, Clock>

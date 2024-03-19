@@ -15,7 +15,7 @@ embedded-nal = "0.7"
 embedded-time = "0.12"
 
 [dependencies.nanorand]
-version = "0.6.1"
+version = "0.7.0"
 default-features = false
 features = ["wyrand"]
 
@@ -25,7 +25,7 @@ features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dns", "socket
 default-features = false
 
 [dependencies.shared-bus]
-version = "0.2.2"
+version = "0.3.1"
 optional = true
 
 [features]

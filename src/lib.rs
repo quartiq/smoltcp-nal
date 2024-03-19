@@ -17,7 +17,7 @@
 
 use core::convert::TryFrom;
 pub use embedded_nal;
-use nanorand::Rng;
+use nanorand::{Rng, SeedableRng};
 pub use smoltcp;
 
 use embedded_nal::{TcpClientStack, UdpClientStack, UdpFullStack};
@@ -202,7 +202,10 @@ where
     /// # Args
     /// * `seed` - A seed of random data to use for randomizing local TCP port selection.
     pub fn seed_random_port(&mut self, seed: &[u8]) {
-        self.rand.reseed(seed);
+        let mut s = [0; 8];
+        let n = seed.len().min(s.len());
+        s[..n].copy_from_slice(&seed[..n]);
+        self.rand.reseed(s);
     }
 
     /// Poll the network stack for potential updates.

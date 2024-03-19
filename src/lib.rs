@@ -733,10 +733,9 @@ where
     }
 
     fn get_host_by_address(
-        &self,
+        &mut self,
         _addr: embedded_nal::IpAddr,
-        _result: &mut [u8],
-    ) -> Result<usize, Self::Error> {
+    ) -> embedded_nal::nb::Result<embedded_nal::heapless::String<256>, Self::Error> {
         unimplemented!()
     }
 }

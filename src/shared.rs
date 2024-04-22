@@ -100,8 +100,13 @@ where
 
     forward! {get_host_by_name(hostname: &str, addr_type: embedded_nal::AddrType) -> embedded_nal::nb::Result<embedded_nal::IpAddr, Self::Error>}
 
-    fn get_host_by_address(&self, addr: embedded_nal::IpAddr, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        self.mutex.lock(|stack| stack.get_host_by_address(addr, buf))
+    fn get_host_by_address(
+        &self,
+        addr: embedded_nal::IpAddr,
+        buf: &mut [u8],
+    ) -> Result<usize, Self::Error> {
+        self.mutex
+            .lock(|stack| stack.get_host_by_address(addr, buf))
     }
 }
 

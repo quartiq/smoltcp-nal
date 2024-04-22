@@ -700,7 +700,7 @@ where
         let handle = self.dns_handle.ok_or(NetworkError::Unsupported)?;
         let dns_socket: &mut smoltcp::socket::dns::Socket = self.sockets.get_mut(handle);
         let context = self.network_interface.context();
-        let key = heapless::String::try_from(hostname).map_err(|_| NetworkError::Unsupported)?;
+        let key = heapless::String::from(hostname);
 
         if let Some(handle) = self.dns_lookups.get(&key) {
             match dns_socket.get_query_result(*handle) {
@@ -733,9 +733,10 @@ where
     }
 
     fn get_host_by_address(
-        &mut self,
+        &self,
         _addr: embedded_nal::IpAddr,
-    ) -> embedded_nal::nb::Result<embedded_nal::heapless::String<256>, Self::Error> {
+        _: &mut [u8],
+    ) -> Result<usize, Self::Error> {
         unimplemented!()
     }
 }

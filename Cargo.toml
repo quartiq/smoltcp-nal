@@ -11,7 +11,7 @@ repository = "https://github.com/quartiq/smoltcp-nal.git"
 
 [dependencies]
 heapless = "0.7"
-embedded-nal = "0.7"
+embedded-nal = "0.8"
 embedded-time = "0.12"
 
 [dependencies.nanorand]

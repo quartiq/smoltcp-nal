@@ -4,6 +4,9 @@ This document describes the changes to smoltcp-nal between releases.
 
 # [0.4.1] - 2023-08-22
 
+## Changed
+* [breaking] Updated to `embedded-nal` v0.8
+
 ## Added
 * Added support for `embedded_nal::Dns` traits
 

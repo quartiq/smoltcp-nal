@@ -2,7 +2,7 @@
 
 This document describes the changes to smoltcp-nal between releases.
 
-# Unreleased
+# [0.5.1] - 2024-06-21
 
 ## Fixed
 * Fixed an issue where attempting to open sockets before DHCP was completed wwould result in an
@@ -61,8 +61,9 @@ internal panic.
 # Version [0.1.0] - 2021-02-17
 * Initial library release and publish to crates.io
 
-[Unreleased]: https://github.com/quartiq/smoltcp-nal/compare/0.5.0...HEAD
-[0.5.0]: https://github.com/quartiq/smoltcp-nal/tree/0.4.1
+[Unreleased]: https://github.com/quartiq/smoltcp-nal/compare/0.5.1...HEAD
+[0.5.1]: https://github.com/quartiq/smoltcp-nal/tree/0.5.1
+[0.5.0]: https://github.com/quartiq/smoltcp-nal/tree/0.5.0
 [0.4.1]: https://github.com/quartiq/smoltcp-nal/tree/0.4.1
 [0.4.0]: https://github.com/quartiq/smoltcp-nal/tree/0.4.0
 [0.3.0]: https://github.com/quartiq/smoltcp-nal/tree/0.3.0

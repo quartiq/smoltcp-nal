@@ -55,6 +55,7 @@ pub enum NetworkError {
     UdpWriteFailure(smoltcp::socket::udp::SendError),
     Unsupported,
     NotConnected,
+    NoAddress,
 }
 
 impl embedded_nal::TcpError for NetworkError {
@@ -561,15 +562,16 @@ where
         // Select a random port to bind to locally.
         let local_port = self.get_ephemeral_port();
 
-        let local_address = self
+        let Some(cidr) = self
             .network_interface
             .ip_addrs()
             .iter()
             .find(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
-            .unwrap()
-            .address();
+        else {
+            return Err(NetworkError::NoAddress);
+        };
 
-        let local_endpoint = IpEndpoint::new(local_address, local_port);
+        let local_endpoint = IpEndpoint::new(cidr.address(), local_port);
 
         let internal_socket: &mut smoltcp::socket::udp::Socket =
             self.sockets.get_mut(socket.handle);
@@ -639,15 +641,16 @@ where
 {
     /// Bind a UDP socket to a specific port.
     fn bind(&mut self, socket: &mut UdpSocket, local_port: u16) -> Result<(), NetworkError> {
-        let local_address = self
+        let Some(cidr) = self
             .network_interface
             .ip_addrs()
             .iter()
             .find(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
-            .unwrap()
-            .address();
+        else {
+            return Err(NetworkError::NoAddress);
+        };
 
-        let local_endpoint = IpEndpoint::new(local_address, local_port);
+        let local_endpoint = IpEndpoint::new(cidr.address(), local_port);
 
         let internal_socket: &mut smoltcp::socket::udp::Socket =
             self.sockets.get_mut(socket.handle);

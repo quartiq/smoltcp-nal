@@ -2,6 +2,12 @@
 
 This document describes the changes to smoltcp-nal between releases.
 
+# Unreleased
+
+## Fixed
+* Fixed an issue where attempting to open sockets before DHCP was completed wwould result in an
+internal panic.
+
 # [0.5.0] - 2024-04-22
 
 ## Changed

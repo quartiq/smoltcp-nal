@@ -64,7 +64,7 @@ where
     type Error = S::Error;
 
     forward! {socket() -> Result<S::TcpSocket, S::Error>}
-    forward! {connect(socket: &mut S::TcpSocket, remote: embedded_nal::SocketAddr) -> embedded_nal::nb::Result<(), S::Error>}
+    forward! {connect(socket: &mut S::TcpSocket, remote: core::net::SocketAddr) -> embedded_nal::nb::Result<(), S::Error>}
     forward! {send(socket: &mut S::TcpSocket, buffer: &[u8]) -> embedded_nal::nb::Result<usize, S::Error>}
     forward! {receive(socket: &mut S::TcpSocket, buffer: &mut [u8]) -> embedded_nal::nb::Result<usize, S::Error>}
     forward! {close(socket: S::TcpSocket) -> Result<(), S::Error>}
@@ -78,10 +78,10 @@ where
     type Error = S::Error;
 
     forward! {socket() -> Result<S::UdpSocket, S::Error>}
-    forward! {connect(socket: &mut S::UdpSocket, remote: embedded_nal::SocketAddr) -> Result<(), S::Error>}
+    forward! {connect(socket: &mut S::UdpSocket, remote: core::net::SocketAddr) -> Result<(), S::Error>}
 
     forward! {send(socket: &mut S::UdpSocket, buffer: &[u8]) -> embedded_nal::nb::Result<(), S::Error>}
-    forward! {receive(socket: &mut S::UdpSocket, buffer: &mut [u8]) -> embedded_nal::nb::Result<(usize, embedded_nal::SocketAddr), S::Error>}
+    forward! {receive(socket: &mut S::UdpSocket, buffer: &mut [u8]) -> embedded_nal::nb::Result<(usize, core::net::SocketAddr), S::Error>}
     forward! {close(socket: S::UdpSocket) -> Result<(), S::Error>}
 }
 
@@ -89,7 +89,7 @@ impl<'a, S> embedded_nal::UdpFullStack for NetworkStackProxy<'a, S>
 where
     S: embedded_nal::UdpFullStack,
 {
-    forward! {send_to(socket: &mut S::UdpSocket, remote: embedded_nal::SocketAddr, buffer: &[u8]) -> embedded_nal::nb::Result<(), S::Error>}
+    forward! {send_to(socket: &mut S::UdpSocket, remote: core::net::SocketAddr, buffer: &[u8]) -> embedded_nal::nb::Result<(), S::Error>}
     forward! {bind(socket: &mut S::UdpSocket, local_port: u16) -> Result<(), S::Error>}
 }
 impl<'a, S> embedded_nal::Dns for NetworkStackProxy<'a, S>
@@ -98,13 +98,13 @@ where
 {
     type Error = S::Error;
 
-    forward! {get_host_by_name(hostname: &str, addr_type: embedded_nal::AddrType) -> embedded_nal::nb::Result<embedded_nal::IpAddr, Self::Error>}
+    forward! {get_host_by_name(hostname: &str, addr_type: embedded_nal::AddrType) -> embedded_nal::nb::Result<core::net::IpAddr, Self::Error>}
 
     fn get_host_by_address(
-        &self,
-        addr: embedded_nal::IpAddr,
+        &mut self,
+        addr: core::net::IpAddr,
         buf: &mut [u8],
-    ) -> Result<usize, Self::Error> {
+    ) -> Result<usize, embedded_nal::nb::Error<Self::Error>> {
         self.mutex
             .lock(|stack| stack.get_host_by_address(addr, buf))
     }

@@ -2,6 +2,11 @@
 
 This document describes the changes to smoltcp-nal between releases.
 
+# Unreleased
+
+* [breaking] `embedded-nal` bumped. Now `core::net::SocketAddr` and related ip types are used.
+  MSRV becomes 1.77.0.
+
 # [0.5.1] - 2024-06-22
 
 ## Fixed

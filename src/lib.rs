@@ -15,7 +15,10 @@
 //! the resources that use the network stack in a single resource.
 #![no_std]
 
-use core::convert::TryFrom;
+use core::{
+    convert::TryFrom,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+};
 pub use embedded_nal;
 use nanorand::{Rng, SeedableRng};
 pub use smoltcp;
@@ -425,7 +428,7 @@ where
     }
 }
 
-impl<'a, Device, Clock> TcpClientStack for NetworkStack<'a, Device, Clock>
+impl<Device, Clock> TcpClientStack for NetworkStack<'_, Device, Clock>
 where
     Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
@@ -451,10 +454,10 @@ where
     fn connect(
         &mut self,
         socket: &mut SocketHandle,
-        remote: embedded_nal::SocketAddr,
+        remote: SocketAddr,
     ) -> embedded_nal::nb::Result<(), NetworkError> {
         let dest_addr = match remote.ip() {
-            embedded_nal::IpAddr::V4(addr) => {
+            IpAddr::V4(addr) => {
                 let octets = addr.octets();
                 smoltcp::wire::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3])
             }
@@ -515,7 +518,7 @@ where
     }
 }
 
-impl<'a, Device, Clock> UdpClientStack for NetworkStack<'a, Device, Clock>
+impl<Device, Clock> UdpClientStack for NetworkStack<'_, Device, Clock>
 where
     Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
@@ -540,14 +543,10 @@ where
         })
     }
 
-    fn connect(
-        &mut self,
-        socket: &mut UdpSocket,
-        remote: embedded_nal::SocketAddr,
-    ) -> Result<(), NetworkError> {
+    fn connect(&mut self, socket: &mut UdpSocket, remote: SocketAddr) -> Result<(), NetworkError> {
         // Store the route for this socket.
         match remote {
-            embedded_nal::SocketAddr::V4(addr) => {
+            SocketAddr::V4(addr) => {
                 let octets = addr.ip().octets();
                 socket.destination.replace(IpEndpoint::new(
                     IpAddress::v4(octets[0], octets[1], octets[2], octets[3]),
@@ -599,7 +598,7 @@ where
         &mut self,
         socket: &mut UdpSocket,
         buffer: &mut [u8],
-    ) -> embedded_nal::nb::Result<(usize, embedded_nal::SocketAddr), NetworkError> {
+    ) -> embedded_nal::nb::Result<(usize, SocketAddr), NetworkError> {
         let internal_socket: &mut smoltcp::socket::udp::Socket =
             self.sockets.get_mut(socket.handle);
         let (size, source) = internal_socket
@@ -609,10 +608,8 @@ where
         let source = {
             let octets = source.endpoint.addr.as_bytes();
 
-            embedded_nal::SocketAddr::new(
-                embedded_nal::IpAddr::V4(embedded_nal::Ipv4Addr::new(
-                    octets[0], octets[1], octets[2], octets[3],
-                )),
+            SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3])),
                 source.endpoint.port,
             )
         };
@@ -633,7 +630,7 @@ where
     }
 }
 
-impl<'a, Device, Clock> UdpFullStack for NetworkStack<'a, Device, Clock>
+impl<Device, Clock> UdpFullStack for NetworkStack<'_, Device, Clock>
 where
     Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
@@ -665,11 +662,11 @@ where
     fn send_to(
         &mut self,
         socket: &mut Self::UdpSocket,
-        remote: embedded_nal::SocketAddr,
+        remote: SocketAddr,
         buffer: &[u8],
     ) -> embedded_nal::nb::Result<(), NetworkError> {
         let destination = match remote {
-            embedded_nal::SocketAddr::V4(addr) => {
+            SocketAddr::V4(addr) => {
                 let octets = addr.ip().octets();
                 IpEndpoint::new(
                     IpAddress::v4(octets[0], octets[1], octets[2], octets[3]),
@@ -688,7 +685,7 @@ where
     }
 }
 
-impl<'a, Device, Clock> embedded_nal::Dns for NetworkStack<'a, Device, Clock>
+impl<Device, Clock> embedded_nal::Dns for NetworkStack<'_, Device, Clock>
 where
     Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
@@ -699,7 +696,7 @@ where
         &mut self,
         hostname: &str,
         _addr_type: embedded_nal::AddrType,
-    ) -> embedded_nal::nb::Result<embedded_nal::IpAddr, Self::Error> {
+    ) -> embedded_nal::nb::Result<IpAddr, Self::Error> {
         let handle = self.dns_handle.ok_or(NetworkError::Unsupported)?;
         let dns_socket: &mut smoltcp::socket::dns::Socket = self.sockets.get_mut(handle);
         let context = self.network_interface.context();
@@ -713,7 +710,7 @@ where
                     let smoltcp::wire::IpAddress::Ipv4(addr) = addr else {
                         panic!("Unexpected address return type");
                     };
-                    return Ok(embedded_nal::IpAddr::V4(addr.0.into()));
+                    return Ok(IpAddr::V4(addr.0.into()));
                 }
                 Err(smoltcp::socket::dns::GetQueryResultError::Pending) => {}
                 Err(smoltcp::socket::dns::GetQueryResultError::Failed) => {
@@ -736,10 +733,10 @@ where
     }
 
     fn get_host_by_address(
-        &self,
-        _addr: embedded_nal::IpAddr,
+        &mut self,
+        _addr: IpAddr,
         _: &mut [u8],
-    ) -> Result<usize, Self::Error> {
+    ) -> Result<usize, embedded_nal::nb::Error<Self::Error>> {
         unimplemented!()
     }
 }

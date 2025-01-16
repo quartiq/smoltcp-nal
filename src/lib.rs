@@ -428,7 +428,7 @@ where
     }
 }
 
-impl<'a, Device, Clock> TcpClientStack for NetworkStack<'a, Device, Clock>
+impl<Device, Clock> TcpClientStack for NetworkStack<'_, Device, Clock>
 where
     Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
@@ -518,7 +518,7 @@ where
     }
 }
 
-impl<'a, Device, Clock> UdpClientStack for NetworkStack<'a, Device, Clock>
+impl<Device, Clock> UdpClientStack for NetworkStack<'_, Device, Clock>
 where
     Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
@@ -630,7 +630,7 @@ where
     }
 }
 
-impl<'a, Device, Clock> UdpFullStack for NetworkStack<'a, Device, Clock>
+impl<Device, Clock> UdpFullStack for NetworkStack<'_, Device, Clock>
 where
     Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,
@@ -685,7 +685,7 @@ where
     }
 }
 
-impl<'a, Device, Clock> embedded_nal::Dns for NetworkStack<'a, Device, Clock>
+impl<Device, Clock> embedded_nal::Dns for NetworkStack<'_, Device, Clock>
 where
     Device: smoltcp::phy::Device,
     Clock: embedded_time::Clock,

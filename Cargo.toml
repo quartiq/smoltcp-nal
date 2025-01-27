@@ -1,8 +1,8 @@
 [package]
 name = "smoltcp-nal"
-version = "0.5.1"
+version = "0.6.0"
 authors = ["Ryan Summers <ryan.summers@vertigo-designs.com>"]
-edition = "2018"
+edition = "2021"
 license = "MIT"
 description = "embedded-nal implementation for smoltcp"
 keywords = ["smoltcp", "embedded-nal", "tcp"]
@@ -22,7 +22,14 @@ features = ["wyrand"]
 
 [dependencies.smoltcp]
 version = "0.11"
-features = ["medium-ethernet", "proto-ipv6", "socket-tcp", "socket-dns", "socket-dhcpv4", "socket-udp"]
+features = [
+    "medium-ethernet",
+    "proto-ipv6",
+    "socket-tcp",
+    "socket-dns",
+    "socket-dhcpv4",
+    "socket-udp",
+]
 default-features = false
 
 [dependencies.shared-bus]

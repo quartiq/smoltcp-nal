@@ -17,7 +17,7 @@
 
 use core::{
     convert::TryFrom,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
 };
 pub use embedded_nal;
 use nanorand::{Rng, SeedableRng};
@@ -26,7 +26,7 @@ pub use smoltcp;
 use embedded_nal::{TcpClientStack, UdpClientStack, UdpFullStack};
 use embedded_time::duration::Milliseconds;
 use smoltcp::{
-    iface::SocketHandle,
+    iface::{PollResult, SocketHandle},
     socket::dhcpv4,
     wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr},
 };
@@ -244,9 +244,11 @@ where
             self.last_poll.replace(self.last_poll.unwrap() + elapsed_ms);
         }
 
-        let updated =
+        let updated = matches!(
             self.network_interface
-                .poll(self.stack_time, &mut self.device, &mut self.sockets);
+                .poll(self.stack_time, &mut self.device, &mut self.sockets),
+            PollResult::SocketStateChanged
+        );
 
         // Service the DHCP client.
         if let Some(handle) = self.dhcp_handle {
@@ -256,7 +258,13 @@ where
             if let Some(event) = self.sockets.get_mut::<dhcpv4::Socket>(handle).poll() {
                 match event {
                     dhcpv4::Event::Configured(config) => {
-                        if config.address.address().is_unicast()
+                        let is_unicast = {
+                            let address = config.address.address();
+                            !(address.is_broadcast()
+                                || address.is_multicast()
+                                || address.is_unspecified())
+                        };
+                        if is_unicast
                             && self.network_interface.ipv4_addr().unwrap()
                                 != config.address.address()
                         {
@@ -606,12 +614,12 @@ where
             .map_err(|e| embedded_nal::nb::Error::Other(NetworkError::UdpReadFailure(e)))?;
 
         let source = {
-            let octets = source.endpoint.addr.as_bytes();
+            let addr = match source.endpoint.addr {
+                IpAddress::Ipv4(addr) => IpAddr::V4(addr),
+                IpAddress::Ipv6(addr) => IpAddr::V6(addr),
+            };
 
-            SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3])),
-                source.endpoint.port,
-            )
+            SocketAddr::new(addr, source.endpoint.port)
         };
 
         Ok((size, source))
@@ -710,7 +718,7 @@ where
                     let smoltcp::wire::IpAddress::Ipv4(addr) = addr else {
                         panic!("Unexpected address return type");
                     };
-                    return Ok(IpAddr::V4(addr.0.into()));
+                    return Ok(IpAddr::V4(*addr));
                 }
                 Err(smoltcp::socket::dns::GetQueryResultError::Pending) => {}
                 Err(smoltcp::socket::dns::GetQueryResultError::Failed) => {

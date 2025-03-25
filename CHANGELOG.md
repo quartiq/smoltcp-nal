@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## Changed
 
+* `heapless` updated to 0.8.
 * [breaking] `smoltcp` updated to 0.12.
 
 # [0.6.0](https://github.com/quartiq/smoltcp-nal/compare/v0.5.1...v0.6.0) - 2025-01-27

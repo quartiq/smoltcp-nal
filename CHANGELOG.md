@@ -6,7 +6,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+# [Unreleased](https://github.com/quartiq/smoltcp-nal/compare/v0.6.0...HEAD)
+
+## Changed
+
+* [breaking] `smoltcp` updated to 0.12.
+
 # [0.6.0](https://github.com/quartiq/smoltcp-nal/compare/v0.5.1...v0.6.0) - 2025-01-27
+
+## Changed
 
 * [breaking] `embedded-nal` bumped. Now `core::net::SocketAddr` and related ip types are used.
   MSRV becomes 1.77.0.

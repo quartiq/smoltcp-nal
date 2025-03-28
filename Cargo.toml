@@ -11,7 +11,7 @@ repository = "https://github.com/quartiq/smoltcp-nal.git"
 rust-version = "1.77.0"
 
 [dependencies]
-heapless = "0.7"
+heapless = "0.8"
 embedded-nal = "0.9"
 embedded-time = "0.12"
 

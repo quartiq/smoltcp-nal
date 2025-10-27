@@ -16,7 +16,7 @@ embedded-nal = "0.9"
 embedded-time = "0.12"
 
 [dependencies.nanorand]
-version = "0.7.0"
+version = "0.8.0"
 default-features = false
 features = ["wyrand"]
 

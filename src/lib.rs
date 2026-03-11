@@ -26,7 +26,7 @@ pub use smoltcp;
 use embedded_nal::{TcpClientStack, UdpClientStack, UdpFullStack};
 use embedded_time::{duration::Milliseconds, TimeError};
 use smoltcp::{
-    iface::{PollResult, SocketHandle},
+    iface::{PollIngressSingleResult, PollResult, SocketHandle},
     socket::dhcpv4,
     wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr},
 };
@@ -239,11 +239,27 @@ where
             self.last_poll = last_poll.checked_add(elapsed_ms);
         }
 
-        let updated = matches!(
-            self.network_interface
-                .poll(self.stack_time, &mut self.device, &mut self.sockets),
-            PollResult::SocketStateChanged
+        let ingress_socket_state_changed = matches!(
+            self.network_interface.poll_ingress_single(
+                self.stack_time,
+                &mut self.device,
+                &mut self.sockets,
+            ),
+            PollIngressSingleResult::SocketStateChanged
         );
+
+        let egress_socket_state_changed = matches!(
+            self.network_interface.poll_egress(
+                self.stack_time,
+                &mut self.device,
+                &mut self.sockets,
+            ),
+            PollResult::SocketStateChanged,
+        );
+
+        if !ingress_socket_state_changed && !egress_socket_state_changed {
+            return Ok(false);
+        }
 
         // Service the DHCP client.
         if let Some(handle) = self.dhcp_handle {
@@ -318,7 +334,7 @@ where
             }
         }
 
-        Ok(updated)
+        Ok(true)
     }
 
     /// Force-close all sockets.

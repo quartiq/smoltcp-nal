@@ -24,7 +24,7 @@ use nanorand::{Rng, SeedableRng};
 pub use smoltcp;
 
 use embedded_nal::{TcpClientStack, UdpClientStack, UdpFullStack};
-use embedded_time::duration::Milliseconds;
+use embedded_time::{duration::Milliseconds, TimeError};
 use smoltcp::{
     iface::{PollResult, SocketHandle},
     socket::dhcpv4,
@@ -219,29 +219,24 @@ where
     pub fn poll(&mut self) -> Result<bool, Error> {
         let now = self.clock.try_now()?;
 
-        // We can only start using the clock once we call `poll()`, as it may not be initialized
-        // beforehand. In these cases, the last_poll may be uninitialized. If this is the case,
+        // We can only start using the clock once we call `poll`, as it may not be initialized
+        // beforehand. In these cases, `last_poll` may be uninitialized. If this is the case,
         // populate it now.
-        if self.last_poll.is_none() {
-            self.last_poll.replace(now);
-        }
+        let last_poll = self.last_poll.get_or_insert(now);
 
-        // Note(unwrap): We guarantee that the last_poll value is set above.
-        let elapsed_system_time = now - *self.last_poll.as_ref().unwrap();
-
-        let elapsed_ms: Milliseconds<u32> = Milliseconds::try_from(elapsed_system_time)?;
-
-        if elapsed_ms.0 > 0 {
+        if let Some(elapsed_system_time) = now.checked_duration_since(last_poll) {
+            let elapsed_ms: Milliseconds<u32> = Milliseconds::try_from(elapsed_system_time)?;
             self.stack_time += smoltcp::time::Duration::from_millis(elapsed_ms.0.into());
 
             // In order to avoid quantization noise, instead of setting the previous poll instant
             // to the current time, we set it to the last poll instant plus the number of millis
-            // that we incremented smoltcps time by. This ensures that if e.g. we had 1.5 millis
-            // elapse, we don't accidentally discard the 500 microseconds by fast-forwarding
-            // smoltcp by 1ms, but moving our internal timer by 1.5ms.
+            // that we incremented `smoltcp`'s time by. This ensures that if e.g. we had 1.5 ms
+            // elapse, we don't accidentally discard the 500 µs by fast-forwarding
+            // `smoltcp` by 1 ms, but moving our internal timer by 1.5 ms.
             //
-            // Note(unwrap): We guarantee that last_poll is always some time above.
-            self.last_poll.replace(self.last_poll.unwrap() + elapsed_ms);
+            // The only exception is when `checked_add` overflows, in which case `last_poll`
+            // is reset and will restart at the current time.
+            self.last_poll = last_poll.checked_add(elapsed_ms);
         }
 
         let updated = matches!(

@@ -18,13 +18,14 @@
 use core::{
     convert::TryFrom,
     net::{IpAddr, SocketAddr},
+    num::NonZero,
 };
 pub use embedded_nal;
 use nanorand::{Rng, SeedableRng};
 pub use smoltcp;
 
 use embedded_nal::{TcpClientStack, UdpClientStack, UdpFullStack};
-use embedded_time::{duration::Milliseconds, TimeError};
+use embedded_time::duration::Milliseconds;
 use smoltcp::{
     iface::{PollIngressSingleResult, PollResult, SocketHandle},
     socket::dhcpv4,
@@ -212,11 +213,7 @@ where
         self.rand.reseed(s);
     }
 
-    /// Poll the network stack for potential updates.
-    ///
-    /// # Returns
-    /// A boolean indicating if the network stack updated in any way.
-    pub fn poll(&mut self) -> Result<bool, Error> {
+    fn poll_inner(&mut self, poll_count: Option<NonZero<usize>>) -> Result<bool, Error> {
         let now = self.clock.try_now()?;
 
         // We can only start using the clock once we call `poll`, as it may not be initialized
@@ -239,25 +236,39 @@ where
             self.last_poll = last_poll.checked_add(elapsed_ms);
         }
 
-        let ingress_socket_state_changed = matches!(
-            self.network_interface.poll_ingress_single(
+        let mut socket_state_changed = false;
+
+        let mut poll_count = poll_count.map(NonZero::get);
+        loop {
+            match self.network_interface.poll_ingress_single(
                 self.stack_time,
                 &mut self.device,
                 &mut self.sockets,
-            ),
-            PollIngressSingleResult::SocketStateChanged
-        );
+            ) {
+                PollIngressSingleResult::None => break,
+                PollIngressSingleResult::PacketProcessed => (),
+                PollIngressSingleResult::SocketStateChanged => socket_state_changed = true,
+            }
 
-        let egress_socket_state_changed = matches!(
-            self.network_interface.poll_egress(
-                self.stack_time,
-                &mut self.device,
-                &mut self.sockets,
-            ),
-            PollResult::SocketStateChanged,
-        );
+            if let Some(ref mut poll_count) = poll_count {
+                if *poll_count == 1 {
+                    break;
+                }
 
-        if !ingress_socket_state_changed && !egress_socket_state_changed {
+                *poll_count -= 1;
+            }
+        }
+
+        match self.network_interface.poll_egress(
+            self.stack_time,
+            &mut self.device,
+            &mut self.sockets,
+        ) {
+            PollResult::None => (),
+            PollResult::SocketStateChanged => socket_state_changed = true,
+        }
+
+        if !socket_state_changed {
             return Ok(false);
         }
 
@@ -335,6 +346,26 @@ where
         }
 
         Ok(true)
+    }
+
+    /// Polls the network stack for potential updates.
+    ///
+    /// Processes at most `n` incoming packets to avoid DoS events.
+    ///
+    /// Returns boolean indicating if the network stack updated in any way.
+    #[inline(always)]
+    pub fn poll_n(&mut self, n: NonZero<usize>) -> Result<bool, Error> {
+        self.poll_inner(Some(n))
+    }
+
+    /// Polls the network stack for potential updates.
+    ///
+    /// Processes all incoming packets.
+    ///
+    /// Returns boolean indicating if the network stack updated in any way.
+    #[inline(always)]
+    pub fn poll(&mut self) -> Result<bool, Error> {
+        self.poll_inner(None)
     }
 
     /// Force-close all sockets.

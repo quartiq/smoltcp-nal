@@ -24,7 +24,7 @@ use nanorand::{Rng, SeedableRng};
 pub use smoltcp;
 
 use embedded_nal::{TcpClientStack, UdpClientStack, UdpFullStack};
-use embedded_time::{duration::Milliseconds, TimeError};
+use embedded_time::duration::Milliseconds;
 use smoltcp::{
     iface::{PollResult, SocketHandle},
     socket::dhcpv4,
@@ -338,15 +338,21 @@ where
         }
     }
 
+    fn ipv4_addr_mut(addrs: &mut [IpCidr]) -> Option<&mut Ipv4Cidr> {
+        addrs.iter_mut().find_map(|cidr| match cidr {
+            IpCidr::Ipv4(addr) => Some(addr),
+            _ => None,
+        })
+    }
+
     fn set_ipv4_addr(interface: &mut smoltcp::iface::Interface, address: Ipv4Cidr) {
         interface.update_ip_addrs(|addrs| {
-            // Note(unwrap): This stack requires at least 1 Ipv4 Address.
-            match addrs
-                .iter_mut()
-                .find(|cidr| matches!(cidr.address(), IpAddress::Ipv4(_)))
-            {
-                Some(addr) => *addr = IpCidr::Ipv4(address),
-                None => addrs.push(IpCidr::Ipv4(address)).unwrap(),
+            if let Some(existing_ipv4_addr) = Self::ipv4_addr_mut(addrs) {
+                *existing_ipv4_addr = address;
+            } else {
+                // NOTE(unwrap): This stack requires at least one IPv4 address, so if
+                //               there is none yet, there must be space for one.
+                addrs.push(IpCidr::Ipv4(address)).unwrap();
             }
         });
     }
@@ -361,8 +367,8 @@ where
             self.sockets.get_mut::<dhcpv4::Socket>(handle).reset();
 
             self.network_interface.update_ip_addrs(|addrs| {
-                if let Some(addr) = addrs.iter_mut().next() {
-                    *addr = IpCidr::Ipv4(Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0));
+                if let Some(addr) = Self::ipv4_addr_mut(addrs) {
+                    *addr = Ipv4Cidr::new(Ipv4Address::UNSPECIFIED, 0);
                 };
             });
         }
@@ -564,16 +570,11 @@ where
         // Select a random port to bind to locally.
         let local_port = self.get_ephemeral_port();
 
-        let Some(cidr) = self
-            .network_interface
-            .ip_addrs()
-            .iter()
-            .find(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
-        else {
+        let Some(address) = self.network_interface.ipv4_addr() else {
             return Err(NetworkError::NoAddress);
         };
 
-        let local_endpoint = IpEndpoint::new(cidr.address(), local_port);
+        let local_endpoint = IpEndpoint::new(address.into(), local_port);
 
         let internal_socket: &mut smoltcp::socket::udp::Socket =
             self.sockets.get_mut(socket.handle);
@@ -641,16 +642,11 @@ where
 {
     /// Bind a UDP socket to a specific port.
     fn bind(&mut self, socket: &mut UdpSocket, local_port: u16) -> Result<(), NetworkError> {
-        let Some(cidr) = self
-            .network_interface
-            .ip_addrs()
-            .iter()
-            .find(|item| matches!(item, smoltcp::wire::IpCidr::Ipv4(_)))
-        else {
+        let Some(address) = self.network_interface.ipv4_addr() else {
             return Err(NetworkError::NoAddress);
         };
 
-        let local_endpoint = IpEndpoint::new(cidr.address(), local_port);
+        let local_endpoint = IpEndpoint::new(address.into(), local_port);
 
         let internal_socket: &mut smoltcp::socket::udp::Socket =
             self.sockets.get_mut(socket.handle);

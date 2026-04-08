@@ -8,10 +8,10 @@ description = "embedded-nal implementation for smoltcp"
 keywords = ["smoltcp", "embedded-nal", "tcp"]
 categories = ["network-programming", "no-std"]
 repository = "https://github.com/quartiq/smoltcp-nal.git"
-rust-version = "1.77.0"
+rust-version = "1.91.0"
 
 [dependencies]
-heapless = "0.8"
+heapless = "0.9"
 embedded-nal = "0.9"
 embedded-time = "0.12"
 
@@ -21,7 +21,7 @@ default-features = false
 features = ["wyrand"]
 
 [dependencies.smoltcp]
-version = "0.12"
+version = "0.13"
 features = [
     "medium-ethernet",
     "proto-ipv6",
